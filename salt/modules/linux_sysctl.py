@@ -1,16 +1,23 @@
+# -*- coding: utf-8 -*-
 '''
 Module for viewing and modifying sysctl parameters
 '''
 
 # Import python libs
-import re
+import logging
 import os
+import re
 
 # Import salt libs
 import salt.utils
 from salt._compat import string_types
 from salt.exceptions import CommandExecutionError
+from salt.modules.systemd import _sd_booted
 
+log = logging.getLogger(__name__)
+
+# Define the module's virtual name
+__virtualname__ = 'sysctl'
 
 # TODO: Add unpersist() to remove either a sysctl or sysctl/value combo from
 # the config
@@ -20,12 +27,51 @@ def __virtual__():
     '''
     Only run on Linux systems
     '''
-    return 'sysctl' if __grains__['kernel'] == 'Linux' else False
+    if __grains__['kernel'] != 'Linux':
+        return False
+    global _sd_booted
+    _sd_booted = salt.utils.namespaced_function(_sd_booted, globals())
+    return __virtualname__
 
 
-def show():
+def default_config():
+    '''
+    Linux hosts using systemd 207 or later ignore ``/etc/sysctl.conf`` and only
+    load from ``/etc/sysctl.d/*.conf``. This function will do the proper checks
+    and return a default config file which will be valid for the Minion. Hosts
+    running systemd >= 207 will use ``/etc/sysctl.d/99-salt.conf``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt -G 'kernel:Linux' sysctl.default_config
+    '''
+    if _sd_booted():
+        for line in __salt__['cmd.run_stdout'](
+            'systemctl --version'
+        ).splitlines():
+            if line.startswith('systemd '):
+                version = line.split()[-1]
+                try:
+                    if int(version) >= 207:
+                        return '/etc/sysctl.d/99-salt.conf'
+                except ValueError:
+                    log.error(
+                        'Unexpected non-numeric systemd version {0!r} '
+                        'detected'.format(version)
+                    )
+                break
+
+    return '/etc/sysctl.conf'
+
+
+def show(config_file=False):
     '''
     Return a list of sysctl parameters for this minion
+
+    config: Pull the data from the system configuration file
+        instead of the live data.
 
     CLI Example:
 
@@ -33,13 +79,31 @@ def show():
 
         salt '*' sysctl.show
     '''
-    cmd = 'sysctl -a'
     ret = {}
-    for line in __salt__['cmd.run_stdout'](cmd).splitlines():
-        if not line or ' = ' not in line:
-            continue
-        comps = line.split(' = ', 1)
-        ret[comps[0]] = comps[1]
+    if config_file:
+        config_file_path = default_config()
+        try:
+            for line in salt.utils.fopen(config_file_path):
+                if not line.startswith('#') and '=' in line:
+                    # search if we have some '=' instead of ' = ' separators
+                    SPLIT = ' = '
+                    if SPLIT not in line:
+                        SPLIT = SPLIT.strip()
+                    key, value = line.split(SPLIT, 1)
+                    key = key.strip()
+                    value = value.lstrip()
+                    ret[key] = value
+        except OSError:
+            log.error('Could not open sysctl file')
+            return None
+    else:
+        cmd = 'sysctl -a'
+        out = __salt__['cmd.run_stdout'](cmd, output_loglevel='trace')
+        for line in out.splitlines():
+            if not line or ' = ' not in line:
+                continue
+            comps = line.split(' = ', 1)
+            ret[comps[0]] = comps[1]
     return ret
 
 
@@ -94,9 +158,11 @@ def assign(name, value):
     return ret
 
 
-def persist(name, value, config='/etc/sysctl.conf'):
+def persist(name, value, config=None):
     '''
-    Assign and persist a simple sysctl parameter for this minion
+    Assign and persist a simple sysctl parameter for this minion. If ``config``
+    is not specified, a sensible default will be chosen using
+    :mod:`sysctl.default_config <salt.modules.linux_sysctl.default_config>`.
 
     CLI Example:
 
@@ -104,6 +170,8 @@ def persist(name, value, config='/etc/sysctl.conf'):
 
         salt '*' sysctl.persist net.ipv4.ip_forward 1
     '''
+    if config is None:
+        config = default_config()
     running = show()
     edited = False
     # If the sysctl.conf is not present, add it

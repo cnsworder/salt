@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 A runner module to collect and display the inline documentation from the
 various module types
@@ -13,12 +14,21 @@ import salt.wheel
 
 
 def __virtual__():
-    return 'doc'
+    '''
+    Always load
+    '''
+    return True
 
 
 def runner():
     '''
-    Return all inline documetation for runner modules
+    Return all inline documentation for runner modules
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-run doc.runner
     '''
     client = salt.runner.RunnerClient(__opts__)
     ret = client.get_docs()
@@ -29,6 +39,12 @@ def runner():
 def wheel():
     '''
     Return all inline documentation for wheel modules
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-run doc.wheel
     '''
     client = salt.wheel.Wheel(__opts__)
     ret = client.get_docs()
@@ -39,8 +55,14 @@ def wheel():
 def execution():
     '''
     Collect all the sys.doc output from each minion and return the aggregate
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-run doc.execution
     '''
-    client = salt.client.LocalClient(__opts__['conf_file'])
+    client = salt.client.get_local_client(__opts__['conf_file'])
 
     docs = {}
     for ret in client.cmd_iter('*', 'sys.doc', timeout=__opts__['timeout']):
@@ -60,7 +82,7 @@ def __list_functions(user=None):
     List all of the functions, optionally pass in a user to evaluate
     permissions on
     '''
-    client = salt.client.LocalClient(__opts__['conf_file'])
+    client = salt.client.get_local_client(__opts__['conf_file'])
     funcs = {}
     gener = client.cmd_iter(
             '*',

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Return data to a mysql server
 
@@ -47,21 +48,26 @@ Use the following mysql database schema::
       `id` varchar(255) NOT NULL,
       `success` varchar(10) NOT NULL,
       `full_ret` mediumtext NOT NULL,
+      `alter_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       KEY `id` (`id`),
       KEY `jid` (`jid`),
       KEY `fun` (`fun`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 Required python modules: MySQLdb
+
+  To use the mysql returner, append '--return mysql' to the salt command. ex:
+
+    salt '*' test.ping --return mysql
 '''
+# Let's not allow PyLint complain about string substitution
+# pylint: disable=W1321,E1321
 
 # Import python libs
 from contextlib import contextmanager
 import sys
 import json
 import logging
-
-log  = logging.getLogger( __name__ )
 
 # Import third party libs
 try:
@@ -70,11 +76,14 @@ try:
 except ImportError:
     HAS_MYSQL = False
 
+log = logging.getLogger(__name__)
+
 
 def __virtual__():
     if not HAS_MYSQL:
         return False
-    return 'mysql'
+    return True
+
 
 def _get_options():
     '''
@@ -92,9 +101,13 @@ def _get_options():
             log.debug('Using default for MySQL {0}'.format(attr))
             _options[attr] = defaults[attr]
             continue
-        _options[attr] = _attr
+        if attr == 'port':
+            _options[attr] = int(_attr)
+        else:
+            _options[attr] = _attr
 
     return _options
+
 
 @contextmanager
 def _get_serv(commit=False):
@@ -130,7 +143,7 @@ def returner(ret):
                 VALUES (%s, %s, %s, %s, %s, %s)'''
 
         cur.execute(sql, (ret['fun'], ret['jid'],
-                            str(ret['return']), ret['id'],
+                            json.dumps(ret['return']), ret['id'],
                             ret['success'], json.dumps(ret)))
 
 

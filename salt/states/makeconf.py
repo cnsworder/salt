@@ -1,21 +1,24 @@
+# -*- coding: utf-8 -*-
 '''
 Management of Gentoo make.conf
 ==============================
 
-A state module to manage Gentoo's make.conf file
+A state module to manage Gentoo's ``make.conf`` file
 
 .. code-block:: yaml
 
     makeopts:
-        makeconf.present:
-            - value: '-j3'
+      makeconf.present:
+        - value: '-j3'
 '''
+
 
 def __virtual__():
     '''
     Only load if the makeconf module is available in __salt__
     '''
     return 'makeconf' if 'makeconf.get_var' in __salt__ else False
+
 
 def _make_set(var):
     '''
@@ -30,14 +33,15 @@ def _make_set(var):
             var = list(var)
     return set(var)
 
+
 def present(name, value=None, contains=None, excludes=None):
     '''
-    Verify that the variable is in the make.conf and has the provided
+    Verify that the variable is in the ``make.conf`` and has the provided
     settings. If value is set, contains and excludes will be ignored.
 
     name
-        The variable name. This will automatically be converted to all Upper
-        Case since variables in make.conf are Upper Case
+        The variable name. This will automatically be converted to upper
+        case since variables in ``make.conf`` are in upper case
 
     value
         Enforce that the value of the variable is set to the provided value
@@ -153,13 +157,14 @@ def present(name, value=None, contains=None, excludes=None):
     # Now finally return
     return ret
 
+
 def absent(name):
     '''
-    Verify that the variable is not in the make.conf.
+    Verify that the variable is not in the ``make.conf``.
 
     name
-        The variable name. This will automatically be converted to all Upper
-        Case since variables in make.conf are Upper Case
+        The variable name. This will automatically be converted to upper
+        case since variables in ``make.conf`` are in upper case
     '''
     ret = {'changes': {},
            'comment': '',

@@ -25,16 +25,6 @@
 # processname: /usr/bin/salt-minion
 
 
-if [ -f /etc/default/salt ]; then
-    . /etc/default/salt
-else
-    SALTMINION=/usr/bin/salt-minion
-    PYTHON=/usr/bin/python
-fi
-
-# Sanity checks.
-[ -x $SALTMINION ] || exit 0
-
 DEBIAN_VERSION=/etc/debian_version
 SUSE_RELEASE=/etc/SuSE-release
 # Source function library.
@@ -46,34 +36,42 @@ else
     . /etc/rc.d/init.d/functions
 fi
 
+# Default values (can be overridden below)
+SALTMINION=/usr/bin/salt-minion
+PYTHON=/usr/bin/python
+MINION_ARGS=""
+
+if [ -f /etc/default/salt ]; then
+    . /etc/default/salt
+fi
+
 SERVICE=salt-minion
 PROCESS=salt-minion
-CONFIG_ARGS=" "
 
 RETVAL=0
 
 start() {
     echo -n $"Starting salt-minion daemon: "
     if [ -f $SUSE_RELEASE ]; then
-        startproc -f -p /var/run/$SERVICE.pid $SALTMINION -d $CONFIG_ARGS
+        startproc -f -p /var/run/$SERVICE.pid $SALTMINION -d $MINION_ARGS
         rc_status -v
     elif [ -e $DEBIAN_VERSION ]; then
         if [ -f $LOCKFILE ]; then
             echo -n "already started, lock file found"
             RETVAL=1
-        elif $PYTHON $SALTMINION -d >& /dev/null; then
+        elif $PYTHON $SALTMINION -d $MINION_ARGS >& /dev/null; then
             echo -n "OK"
             RETVAL=0
         fi
     else
-        if [ $(pidofproc $PROCESS) ]; then
-	          RETVAL=$?
-	          echo -n "already running"
+        if [[ ! -z "$(pidofproc -p /var/run/$SERVICE.pid $PROCESS)" ]]; then
+            RETVAL=$?
+            echo -n "already running"
         else
-	          daemon --check $SERVICE $SALTMINION -d $CONFIG_ARGS
-	          RETVAL=$?
+            daemon --check $SERVICE $SALTMINION -d $MINION_ARGS 
         fi
     fi
+    RETVAL=$?
     echo
     return $RETVAL
 }
@@ -83,6 +81,7 @@ stop() {
     if [ -f $SUSE_RELEASE ]; then
         killproc -TERM $SALTMINION
         rc_status -v
+        RETVAL=$?
     elif [ -f $DEBIAN_VERSION ]; then
         # Added this since Debian's start-stop-daemon doesn't support spawned processes
         if ps -ef | grep "$PYTHON $SALTMINION" | grep -v grep | awk '{print $2}' | xargs kill &> /dev/null; then
@@ -94,8 +93,18 @@ stop() {
         fi
     else
         killproc $PROCESS
+        RETVAL=$?
+        # tidy up any rogue processes:
+        PROCS=`ps -ef | grep "$SALTMINION" | grep -v grep | awk '{print $2}'`
+        if [ -n "$PROCS" ]; then
+            kill $PROCS &> /dev/null
+            sleep 1
+            PROCS=`ps -ef | grep "$SALTMINION" | grep -v grep | awk '{print $2}'`
+            if [ -n "$PROCS" ]; then
+                kill -9 $PROCS &> /dev/null
+            fi
+        fi
     fi
-    RETVAL=$?
     echo
 }
 

@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 '''
-Starting or restarting of services and daemons.
-===============================================
+Starting or restarting of services and daemons
+==============================================
 
 Services are defined as system daemons typically started with system init or
 rc scripts, services can be defined as running or dead.
@@ -21,7 +22,7 @@ The service can also be set to be started at runtime via the enable option:
         - enable: True
 
 By default if a service is triggered to refresh due to a watch statement the
-service is by default restarted. If the desired behaviour is to reload the
+service is by default restarted. If the desired behavior is to reload the
 service, then set the reload value to True:
 
 .. code-block:: yaml
@@ -33,20 +34,30 @@ service, then set the reload value to True:
         - reload: True
         - watch:
           - pkg: redis
+
+.. note::
+
+    More details regarding ``watch`` can be found in the
+    :doc:`Requisites </ref/states/requisites>` documentation.
+
 '''
 
 
 def __virtual__():
     '''
-    Ensure that the service state returns the correct name
+    Only make these states available if a service provider has been detected or
+    assigned for this minion
     '''
-    return 'service'
+    return 'service.start' in __salt__
 
 
 def _enabled_used_error(ret):
+    '''
+    Warn of potential typo.
+    '''
     ret['result'] = False
     ret['comment'] = (
-        'Service {0} uses non-existant option "enabled".  ' +
+        'Service {0} uses non-existent option "enabled".  ' +
         'Perhaps "enable" option was intended?'
     ).format(ret['name'])
     return ret
@@ -62,12 +73,11 @@ def _enable(name, started, result=True, **kwargs):
            'comment': ''}
 
     # is service available?
-    ret = _available(name, ret)
-    if not ret.pop('available', True):
+    if not _available(name, ret):
         return ret
 
     # Check to see if this minion supports enable
-    if not 'service.enable' in __salt__ or not 'service.enabled' in __salt__:
+    if 'service.enable' not in __salt__ or 'service.enabled' not in __salt__:
         if started is True:
             ret['comment'] = ('Enable is not available on this minion,'
                               ' service {0} started').format(name)
@@ -86,6 +96,7 @@ def _enable(name, started, result=True, **kwargs):
     if __salt__['service.enabled'](name):
         # Service is enabled
         if started is True:
+            ret['changes'][name] = True
             ret['comment'] = ('Service {0} is already enabled,'
                               ' and is running').format(name)
             return ret
@@ -151,13 +162,12 @@ def _disable(name, started, result=True, **kwargs):
            'comment': ''}
 
     # is service available?
-    ret = _available(name, ret)
-    if not ret.pop('available', True):
+    if not _available(name, ret):
         ret['result'] = True
         return ret
 
     # is enable/disable available?
-    if not 'service.disable' in __salt__ or not 'service.disabled' in __salt__:
+    if 'service.disable' not in __salt__ or 'service.disabled' not in __salt__:
         if started is True:
             ret['comment'] = ('Disable is not available on this minion,'
                               ' service {0} started').format(name)
@@ -234,15 +244,18 @@ def _disable(name, started, result=True, **kwargs):
 
 
 def _available(name, ret):
-    # Check if the service is available
+    '''
+    Check if the service is available
+    '''
+    avail = False
     if 'service.available' in __salt__:
-        ret['available'] = __salt__['service.available'](name)
+        avail = __salt__['service.available'](name)
     elif 'service.get_all' in __salt__:
-        ret['available'] = name in __salt__['service.get_all']()
-    if not ret.get('available', True):
+        avail = name in __salt__['service.get_all']()
+    if not avail:
         ret['result'] = False
         ret['comment'] = 'The named service {0} is not available'.format(name)
-    return ret
+    return avail
 
 
 def running(name, enable=None, sig=None, **kwargs):
@@ -270,8 +283,7 @@ def running(name, enable=None, sig=None, **kwargs):
         return _enabled_used_error(ret)
 
     # Check if the service is available
-    ret = _available(name, ret)
-    if not ret.pop('available', True):
+    if not _available(name, ret):
         return ret
 
     # See if the service is already running
@@ -320,9 +332,9 @@ def dead(name, enable=None, sig=None, **kwargs):
         The name of the init or rc script used to manage the service
 
     enable
-        Set the service to be enabled at boot time, True sets the service to
-        be enabled, False sets the named service to be disabled. The default
-        is None, which does not enable or disable anything.
+        Set the service to be enabled at boot time, ``True`` sets the service
+        to be enabled, ``False`` sets the named service to be disabled. The
+        default is ``None``, which does not enable or disable anything.
 
     sig
         The string to search for when looking for the service process with ps
@@ -337,8 +349,7 @@ def dead(name, enable=None, sig=None, **kwargs):
         return _enabled_used_error(ret)
 
     # Check if the service is available
-    ret = _available(name, ret)
-    if not ret.pop('available', True):
+    if not _available(name, ret):
         ret['result'] = True
         return ret
 
@@ -356,9 +367,9 @@ def dead(name, enable=None, sig=None, **kwargs):
         ret['comment'] = 'Service {0} is set to be killed'.format(name)
         return ret
 
-    changes = {name: __salt__['service.stop'](name)}
+    ret['changes'] = {name: __salt__['service.stop'](name)}
 
-    if not changes[name]:
+    if not ret['changes'][name]:
         ret['result'] = False
         ret['comment'] = 'Service {0} failed to die'.format(name)
         if enable is True:
@@ -369,13 +380,14 @@ def dead(name, enable=None, sig=None, **kwargs):
             ret['result'] = False
             ret['comment'] = 'Service {0} failed to die'.format(name)
             return ret
-
-    if enable is True:
-        return _enable(name, False)
-    elif enable is False:
-        return _disable(name, False)
     else:
-        return ret
+        if enable is True:
+            return _enable(name, False)
+        elif enable is False:
+            return _disable(name, False)
+        else:
+            ret['comment'] = 'Service {0} was killed'.format(name)
+            return ret
 
 
 def enabled(name, **kwargs):
@@ -404,12 +416,16 @@ def disabled(name, **kwargs):
     return _disable(name, None, **kwargs)
 
 
-def mod_watch(name, sig=None, reload=False, full_restart=False):
+def mod_watch(name, sfun=None, sig=None, reload=False, full_restart=False):
     '''
     The service watcher, called to invoke the watch command.
 
     name
         The name of the init or rc script used to manage the service
+
+    sfun
+        The original function which triggered the mod_watch call
+        (`service.running`, for example).
 
     sig
         The string to search for when looking for the service process with ps
@@ -419,25 +435,43 @@ def mod_watch(name, sig=None, reload=False, full_restart=False):
            'result': True,
            'comment': ''}
 
-    if __salt__['service.status'](name, sig):
-        if 'service.reload' in __salt__ and reload:
-            restart_func = __salt__['service.reload']
-        elif 'service.full_restart' in __salt__ and full_restart:
-            restart_func = __salt__['service.full_restart']
+    if sfun == 'dead':
+        verb = 'stop'
+        past_participle = verb + 'ped'
+        if __salt__['service.status'](name, sig):
+            func = __salt__['service.stop']
         else:
-            restart_func = __salt__['service.restart']
-    else:
-        restart_func = __salt__['service.start']
+            ret['result'] = True
+            ret['comment'] = 'Service is already {0}'.format(past_participle)
+            return ret
+    elif sfun == 'running':
+        if __salt__['service.status'](name, sig):
+            if 'service.reload' in __salt__ and reload:
+                func = __salt__['service.reload']
+                verb = 'reload'
+                past_participle = verb + 'ed'
+            elif 'service.full_restart' in __salt__ and full_restart:
+                func = __salt__['service.full_restart']
+                verb = 'fully restart'
+                past_participle = verb + 'ed'
+            else:
+                func = __salt__['service.restart']
+                verb = 'restart'
+                past_participle = verb + 'ed'
+        else:
+            func = __salt__['service.start']
+            verb = 'start'
+            past_participle = verb + 'ed'
 
     if __opts__['test']:
         ret['result'] = None
-        ret['comment'] = 'Service is set to be restarted'
+        ret['comment'] = 'Service is set to be {0}'.format(past_participle)
         return ret
 
-    result = restart_func(name)
+    result = func(name)
 
     ret['changes'] = {name: result}
     ret['result'] = result
-    ret['comment'] = 'Service restarted' if result else \
-                     'Failed to restart the service'
+    ret['comment'] = 'Service {0}'.format(past_participle) if result else \
+                     'Failed to {0} the service'.format(verb)
     return ret

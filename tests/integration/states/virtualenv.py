@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     tests.integration.states.virtualenv
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2012-2013 by the SaltStack Team, see AUTHORS for more details
-    :license: Apache 2.0, see LICENSE for more details.
 '''
 
 # Import python libs
@@ -19,16 +18,13 @@ ensure_in_syspath('../../')
 
 # Import salt libs
 import integration
+import salt.utils
+from salt.modules.virtualenv_mod import KNOWN_BINARY_NAMES
 
 
+@skipIf(salt.utils.which_bin(KNOWN_BINARY_NAMES) is None, 'virtualenv not installed')
 class VirtualenvTest(integration.ModuleCase,
                      integration.SaltReturnAssertsMixIn):
-    def setUp(self):
-        super(VirtualenvTest, self).setUp()
-        ret = self.run_function('cmd.has_exec', ['virtualenv'])
-        if not ret:
-            self.skipTest('virtualenv not installed')
-
     @destructiveTest
     @skipIf(os.geteuid() != 0, 'you must be root to run this test')
     def test_issue_1959_virtualenv_runas(self):
@@ -77,7 +73,6 @@ class VirtualenvTest(integration.ModuleCase,
             '  virtualenv.managed:',
             '    - system_site_packages: False',
             '    - clear: false',
-            '    - mirrors: http://testpypi.python.org/pypi',
             '    - requirements: salt://issue-2594-requirements.txt',
         ]
 
@@ -91,7 +86,7 @@ class VirtualenvTest(integration.ModuleCase,
             )
 
             self.assertSaltTrueReturn(ret)
-            self.assertInSaltComment(ret, 'Created new virtualenv')
+            self.assertInSaltComment('Created new virtualenv', ret)
             self.assertSaltStateChangesEqual(
                 ret, ['pep8==1.3.3'], keys=('packages', 'new')
             )
@@ -118,7 +113,7 @@ class VirtualenvTest(integration.ModuleCase,
             )
 
             self.assertSaltTrueReturn(ret)
-            self.assertInSaltComment(ret, 'virtualenv exists')
+            self.assertInSaltComment('virtualenv exists', ret)
             self.assertSaltStateChangesEqual(
                 ret, ['zope.interface==4.0.1'], keys=('packages', 'new')
             )

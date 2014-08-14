@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Pkgutil support for Solaris
 '''
@@ -7,6 +8,7 @@ import copy
 
 # Import salt libs
 import salt.utils
+from salt.exceptions import CommandExecutionError, MinionError
 
 
 def __virtual__():
@@ -106,7 +108,7 @@ def upgrade(refresh=True, **kwargs):
     __salt__['cmd.run_all'](cmd)
     __context__.pop('pkg.list_pkgs', None)
     new = list_pkgs()
-    return __salt__['pkg_resource.find_changes'](old, new)
+    return salt.utils.compare_dicts(old, new)
 
 
 def list_pkgs(versions_as_list=False, **kwargs):
@@ -142,11 +144,11 @@ def list_pkgs(versions_as_list=False, **kwargs):
     # lines, the package name is in the first column. On odd-offset lines, the
     # package version is in the second column.
     lines = __salt__['cmd.run'](cmd).splitlines()
-    for index in range(0, len(lines)):
+    for index, line in enumerate(lines):
         if index % 2 == 0:
-            name = lines[index].split()[0].strip()
+            name = line.split()[0].strip()
         if index % 2 == 1:
-            version_num = lines[index].split()[1].strip()
+            version_num = line.split()[1].strip()
             __salt__['pkg_resource.add_pkg'](ret, name, version_num)
 
     __salt__['pkg_resource.sort_pkglist'](ret)
@@ -185,7 +187,9 @@ def latest_version(*names, **kwargs):
         salt '*' pkgutil.latest_version CSWpython
         salt '*' pkgutil.latest_version <package1> <package2> <package3> ...
     '''
-    if len(names) == 0:
+    refresh = salt.utils.is_true(kwargs.pop('refresh', True))
+
+    if not names:
         return ''
     ret = {}
     # Initialize the dict with empty strings
@@ -193,7 +197,7 @@ def latest_version(*names, **kwargs):
         ret[name] = ''
 
     # Refresh before looking for the latest version available
-    if salt.utils.is_true(kwargs.get('refresh', True)):
+    if refresh:
         refresh_db()
 
     pkgs = list_pkgs()
@@ -257,10 +261,13 @@ def install(name=None, refresh=False, version=None, pkgs=None, **kwargs):
     if refresh:
         refresh_db()
 
-    # Ignore 'sources' argument
-    pkg_params = __salt__['pkg_resource.parse_targets'](name,
-                                                        pkgs,
-                                                        **kwargs)[0]
+    try:
+        # Ignore 'sources' argument
+        pkg_params = __salt__['pkg_resource.parse_targets'](name,
+                                                            pkgs,
+                                                            **kwargs)[0]
+    except MinionError as exc:
+        raise CommandExecutionError(exc)
 
     if pkg_params is None or len(pkg_params) == 0:
         return {}
@@ -279,7 +286,7 @@ def install(name=None, refresh=False, version=None, pkgs=None, **kwargs):
     __salt__['cmd.run_all'](cmd)
     __context__.pop('pkg.list_pkgs', None)
     new = list_pkgs()
-    return __salt__['pkg_resource.find_changes'](old, new)
+    return salt.utils.compare_dicts(old, new)
 
 
 def remove(name=None, pkgs=None, **kwargs):
@@ -310,7 +317,11 @@ def remove(name=None, pkgs=None, **kwargs):
         salt '*' pkg.remove <package1>,<package2>,<package3>
         salt '*' pkg.remove pkgs='["foo", "bar"]'
     '''
-    pkg_params = __salt__['pkg_resource.parse_targets'](name, pkgs)[0]
+    try:
+        pkg_params = __salt__['pkg_resource.parse_targets'](name, pkgs)[0]
+    except MinionError as exc:
+        raise CommandExecutionError(exc)
+
     old = list_pkgs()
     targets = [x for x in pkg_params if x in old]
     if not targets:
@@ -319,7 +330,7 @@ def remove(name=None, pkgs=None, **kwargs):
     __salt__['cmd.run_all'](cmd)
     __context__.pop('pkg.list_pkgs', None)
     new = list_pkgs()
-    return __salt__['pkg_resource.find_changes'](old, new)
+    return salt.utils.compare_dicts(old, new)
 
 
 def purge(name=None, pkgs=None, **kwargs):

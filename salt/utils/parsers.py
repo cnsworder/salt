@@ -1,29 +1,38 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     salt.utils.parsers
     ~~~~~~~~~~~~~~~~~~
 
-    This is were all the black magic happens on all of salt's CLI tools.
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2012 by the SaltStack Team, see AUTHORS for more details.
-    :license: Apache 2.0, see LICENSE for more details.
+    This is where all the black magic happens on all of salt's CLI tools.
 '''
 
 # Import python libs
+from __future__ import print_function
 import os
 import sys
+import getpass
 import logging
 import optparse
 import traceback
 from functools import partial
 
 # Import salt libs
-import salt.log as log
 import salt.config as config
+import salt.exitcodes
 import salt.loader as loader
+import salt.log.setup as log
+import salt.syspaths as syspaths
 import salt.utils as utils
 import salt.version as version
+import salt.utils.args
+import salt.utils.xdg
+from salt.utils.validate.path import is_writeable
+
+if not utils.is_windows():
+    import salt.cloud.exceptions
 
 
 def _sorted(mixins_or_funcs):
@@ -89,7 +98,7 @@ class OptionParserMeta(MixInMeta):
 
 
 class OptionParser(optparse.OptionParser):
-    VERSION = version.__version__
+    VERSION = version.__saltstack_version__.formatted_version
 
     usage = '%prog'
 
@@ -166,7 +175,7 @@ class OptionParser(optparse.OptionParser):
                     self.config['conf_file']
                 )
             )
-        # Retain the standard behaviour of optparse to return options and args
+        # Retain the standard behavior of optparse to return options and args
         return options, args
 
     def _populate_option_list(self, option_list, add_help=True):
@@ -184,8 +193,8 @@ class OptionParser(optparse.OptionParser):
         )
 
     def print_versions_report(self, file=sys.stdout):
-        print >> file, '\n'.join(version.versions_report())
-        self.exit()
+        print('\n'.join(version.versions_report()), file=file)
+        self.exit(os.EX_OK)
 
 
 class MergeConfigMixIn(object):
@@ -228,9 +237,14 @@ class MergeConfigMixIn(object):
                     self.config[option.dest] = value
             elif value is not None and value != default:
                 # Only set the value in the config file IF it's not the default
-                # value, this allows to tweak settings on the configuration
-                # files bypassing the shell option flags
+                # value, this makes it possible to tweak settings on the
+                # configuration files bypassing the shell option flags
                 self.config[option.dest] = value
+            elif option.dest in self.config:
+                # Let's update the option value with the one from the
+                # configuration file. This allows the parsers to make use of
+                # the updated value by using self.options.<option>
+                setattr(self.options, option.dest, self.config[option.dest])
 
         # Merge parser group options if any
         for group in self.option_groups:
@@ -245,12 +259,136 @@ class MergeConfigMixIn(object):
                     if value is not None:
                         # There's an actual value, add it to the config
                         self.config[option.dest] = value
-                else:
-                    if value is not None and value != default:
-                        # Only set the value in the config file IF it's not the
-                        # default value, this allows to tweak settings on the
-                        # configuration files bypassing the shell option flags
-                        self.config[option.dest] = value
+                elif value is not None and value != default:
+                    # Only set the value in the config file IF it's not the
+                    # default value, this makes it possible to tweak settings
+                    # on the configuration files bypassing the shell option
+                    # flags
+                    self.config[option.dest] = value
+                elif option.dest in self.config:
+                    # Let's update the option value with the one from the
+                    # configuration file. This allows the parsers to make use
+                    # of the updated value by using self.options.<option>
+                    setattr(self.options,
+                            option.dest,
+                            self.config[option.dest])
+
+
+class SaltfileMixIn(object):
+    __metaclass__ = MixInMeta
+    _mixin_prio_ = -20
+
+    def _mixin_setup(self):
+        self.add_option(
+            '--saltfile', default=None,
+            help='Specify the path to a Saltfile. If not passed, on will be '
+                 'searched for in the current working directory'
+        )
+
+    def process_saltfile(self):
+        if self.options.saltfile is None:
+            # No one passed a Saltfile as an option, environment variable!?
+            self.options.saltfile = os.environ.get('SALT_SALTFILE', None)
+
+        if self.options.saltfile is None:
+            # If we're here, no one passed a Saltfile either to the CLI tool or
+            # as an environment variable.
+            # Is there a Saltfile in the current directory?
+            saltfile = os.path.join(os.getcwd(), 'Saltfile')
+            if os.path.isfile(saltfile):
+                self.options.saltfile = saltfile
+
+        if not self.options.saltfile:
+            # There's still no valid Saltfile? No need to continue...
+            return
+
+        if not os.path.isfile(self.options.saltfile):
+            self.error(
+                '{0!r} file does not exist.\n'.format(self.options.saltfile
+                )
+            )
+
+        # Make sure we have an absolute path
+        self.options.saltfile = os.path.abspath(self.options.saltfile)
+
+        # Make sure we let the user know that we will be loading a Saltfile
+        logging.getLogger(__name__).info(
+            'Loading Saltfile from {0!r}'.format(self.options.saltfile)
+        )
+
+        saltfile_config = config._read_conf_file(saltfile)
+
+        if not saltfile_config:
+            # No configuration was loaded from the Saltfile
+            return
+
+        if self.get_prog_name() not in saltfile_config:
+            # There's no configuration specific to the CLI tool. Stop!
+            return
+
+        # We just want our own configuration
+        cli_config = saltfile_config[self.get_prog_name()]
+
+        # If there are any options, who's names match any key from the loaded
+        # Saltfile, we need to update its default value
+        for option in self.option_list:
+            if option.dest is None:
+                # --version does not have dest attribute set for example.
+                continue
+
+            if option.dest not in cli_config:
+                # If we don't have anything in Saltfile for this option, let's
+                # continue processing right now
+                continue
+
+            # Get the passed value from shell. If empty get the default one
+            default = self.defaults.get(option.dest)
+            value = getattr(self.options, option.dest, default)
+            if value != default:
+                # The user passed an argument, we won't override it with the
+                # one from Saltfile, if any
+                continue
+
+            # We reched this far! Set the Saltfile value on the option
+            setattr(self.options, option.dest, cli_config[option.dest])
+
+        # Let's also search for options referred in any option groups
+        for group in self.option_groups:
+            for option in group.option_list:
+                if option.dest is None:
+                    continue
+
+                if option.dest not in cli_config:
+                    # If we don't have anything in Saltfile for this option,
+                    # let's continue processing right now
+                    continue
+
+                # Get the passed value from shell. If empty get the default one
+                default = self.defaults.get(option.dest)
+                value = getattr(self.options, option.dest, default)
+                if value != default:
+                    # The user passed an argument, we won't override it with
+                    # the one from Saltfile, if any
+                    continue
+
+                if option.dest in cli_config:
+                    setattr(self.options,
+                            option.dest,
+                            cli_config[option.dest])
+
+
+class HardCrashMixin(object):
+    __metaclass__ = MixInMeta
+    _mixin_prio_ = 40
+    _config_filename_ = None
+
+    def _mixin_setup(self):
+        hc = os.environ.get('SALT_HARD_CRASH', False)
+        self.add_option(
+            '--hard-crash', action='store_true', default=hc,
+            help=('Raise any original exception rather than exiting gracefully'
+                  ' Default: %default')
+        )
 
 
 class ConfigDirMixIn(object):
@@ -259,11 +397,11 @@ class ConfigDirMixIn(object):
     _config_filename_ = None
 
     def _mixin_setup(self):
-        default = '/etc/salt'
-        if utils.is_windows():
-            default = 'c:\\salt\\conf'
+        config_dir = os.environ.get('SALT_CONFIG_DIR', None)
+        if not config_dir:
+            config_dir = syspaths.CONFIG_DIR
         self.add_option(
-            '-c', '--config-dir', default=default,
+            '-c', '--config-dir', default=config_dir,
             help=('Pass in an alternative configuration directory. Default: '
                   '%default')
         )
@@ -272,7 +410,7 @@ class ConfigDirMixIn(object):
         if not os.path.isdir(self.options.config_dir):
             # No logging is configured yet
             sys.stderr.write(
-                'WARNING: "{0}" directory does not exist.\n'.format(
+                'WARNING: {0!r} directory does not exist.\n'.format(
                     self.options.config_dir
                 )
             )
@@ -281,7 +419,14 @@ class ConfigDirMixIn(object):
         self.options.config_dir = os.path.abspath(self.options.config_dir)
 
         if hasattr(self, 'setup_config'):
-            self.config = self.setup_config()
+            if not hasattr(self, 'config'):
+                self.config = {}
+            try:
+                self.config.update(self.setup_config())
+            except (IOError, OSError) as exc:
+                self.error(
+                    'Failed to load configuration: {0}'.format(exc)
+                )
 
     def get_config_file_path(self, configfile=None):
         if configfile is None:
@@ -358,6 +503,9 @@ class LogLevelMixIn(object):
                 )
             else:
                 self.options.log_level = self._default_logging_level_
+
+        # Setup extended logging right before the last step
+        self._mixin_after_parsed_funcs.append(self.__setup_extended_logging)
         # Setup the console as the last _mixin_after_parsed_func to run
         self._mixin_after_parsed_funcs.append(self.__setup_console_logger)
 
@@ -506,6 +654,41 @@ class LogLevelMixIn(object):
             )
         )
 
+        if not is_writeable(logfile, check_parent=True):
+            # Since we're not be able to write to the log file or its parent
+            # directory (if the log file does not exit), are we the same user
+            # as the one defined in the configuration file?
+            current_user = salt.utils.get_user()
+            if self.config['user'] != current_user:
+                # Yep, not the same user!
+                # Is the current user in ACL?
+                if current_user in self.config.get('client_acl', {}).keys():
+                    # Yep, the user is in ACL!
+                    # Let's write the logfile to its home directory instead.
+                    xdg_dir = salt.utils.xdg.xdg_config_dir()
+                    user_salt_dir = xdg_dir if os.path.isdir(xdg_dir) else '~/.salt'
+
+                    if not os.path.isdir(user_salt_dir):
+                        os.makedirs(user_salt_dir, 0750)
+                    logfile_basename = os.path.basename(
+                        self._default_logging_logfile_
+                    )
+                    logging.getLogger(__name__).debug(
+                        'The user {0!r} is not allowed to write to {1!r}. '
+                        'The log file will be stored in '
+                        '\'~/.salt/{2!r}.log\''.format(
+                            current_user,
+                            logfile,
+                            logfile_basename
+                        )
+                    )
+                    logfile = os.path.join(
+                        user_salt_dir, '{0}.log'.format(logfile_basename)
+                    )
+
+            # If we haven't changed the logfile path and it's not writeable,
+            # salt will fail once we try to setup the logfile logging.
+
         log.setup_logfile_logger(
             logfile,
             loglevel,
@@ -514,6 +697,9 @@ class LogLevelMixIn(object):
         )
         for name, level in self.config['log_granular_levels'].items():
             log.set_logger_level(name, level)
+
+    def __setup_extended_logging(self, *args):
+        log.setup_extended_logging(self.config)
 
     def __setup_console_logger(self, *args):
         # If daemon is set force console logger to quiet
@@ -604,7 +790,9 @@ class PidfileMixin(object):
     def _mixin_setup(self):
         self.add_option(
             '--pid-file', dest='pidfile',
-            default='/var/run/{0}.pid'.format(self.get_prog_name()),
+            default=os.path.join(
+                syspaths.PIDFILE_DIR, '{0}.pid'.format(self.get_prog_name())
+            ),
             help=('Specify the location of the pidfile. Default: %default')
         )
 
@@ -718,13 +906,6 @@ class ExtendedTargetOptionsMixIn(TargetOptionsMixIn):
                   '\'G@os:RedHat and webser* or E@database.*\'')
         )
         group.add_option(
-            '-X', '--exsel',
-            default=False,
-            action='store_true',
-            help=('Instead of using shell globs use the return code of '
-                  'a function.')
-        )
-        group.add_option(
             '-I', '--pillar',
             default=False,
             action='store_true',
@@ -784,7 +965,7 @@ class OutputOptionsMixIn(object):
             '--out', '--output',
             dest='output',
             help=(
-                'Print the output from the \'{0}\' command using the '
+                'Print the output from the {0!r} command using the '
                 'specified outputter. The builtins are {1}.'.format(
                     self.get_prog_name(),
                     ', '.join([repr(k) for k in outputters])
@@ -833,6 +1014,19 @@ class OutputOptionsMixIn(object):
     def process_output(self):
         self.selected_output_option = self.options.output
 
+    def process_output_file(self):
+        if self.options.output_file is not None:
+            if os.path.isfile(self.options.output_file):
+                try:
+                    os.remove(self.options.output_file)
+                except (IOError, OSError) as exc:
+                    self.error(
+                        '{0}: Access denied: {1}'.format(
+                            self.options.output_file,
+                            exc
+                        )
+                    )
+
     def _mixin_after_parsed(self):
         group_options_selected = filter(
             lambda option: (
@@ -852,21 +1046,283 @@ class OutputOptionsMixIn(object):
         self.config['selected_output_option'] = self.selected_output_option
 
 
-class OutputOptionsWithTextMixIn(OutputOptionsMixIn):
-    # This should also be removed
-    _include_text_out_ = True
+class ExecutionOptionsMixIn(object):
+    __metaclass__ = MixInMeta
+    _mixin_prio_ = 10
 
-    def __new__(cls, *args, **kwargs):
-        instance = super(OutputOptionsWithTextMixIn, cls).__new__(
-            cls, *args, **kwargs
+    def _mixin_setup(self):
+        group = self.execution_group = optparse.OptionGroup(
+            self,
+            'Execution Options',
+            # Include description here as a string
         )
-        utils.warn_until(
-            (0, 19),
-            '\'OutputOptionsWithTextMixIn\' has been deprecated. Please '
-            'start using \'OutputOptionsMixIn\'; your code should not need '
-            'any further changes.'
+        group.add_option(
+            '-L', '--location',
+            default=None,
+            help='Specify which region to connect to.'
         )
-        return instance
+        group.add_option(
+            '-a', '--action',
+            default=None,
+            help='Perform an action that may be specific to this cloud '
+                 'provider. This argument requires one or more instance '
+                 'names to be specified.'
+        )
+        group.add_option(
+            '-f', '--function',
+            nargs=2,
+            default=None,
+            metavar='<FUNC-NAME> <PROVIDER>',
+            help='Perform an function that may be specific to this cloud '
+                 'provider, that does not apply to an instance. This '
+                 'argument requires a provider to be specified (i.e.: nova).'
+        )
+        group.add_option(
+            '-p', '--profile',
+            default=None,
+            help='Create an instance using the specified profile.'
+        )
+        group.add_option(
+            '-m', '--map',
+            default=None,
+            help='Specify a cloud map file to use for deployment. This option '
+                 'may be used alone, or in conjunction with -Q, -F, -S or -d.'
+        )
+        group.add_option(
+            '-H', '--hard',
+            default=False,
+            action='store_true',
+            help='Delete all VMs that are not defined in the map file. '
+                 'CAUTION!!! This operation can irrevocably destroy VMs! It '
+                 'must be explicitly enabled in the cloud config file.'
+        )
+        group.add_option(
+            '-d', '--destroy',
+            default=False,
+            action='store_true',
+            help='Destroy the specified instance(s).'
+        )
+        group.add_option(
+            '--no-deploy',
+            default=True,
+            dest='deploy',
+            action='store_false',
+            help='Don\'t run a deploy script after instance creation.'
+        )
+        group.add_option(
+            '-P', '--parallel',
+            default=False,
+            action='store_true',
+            help='Build all of the specified instances in parallel.'
+        )
+        group.add_option(
+            '-u', '--update-bootstrap',
+            default=False,
+            action='store_true',
+            help='Update salt-bootstrap to the latest develop version on '
+                 'GitHub.'
+        )
+        group.add_option(
+            '-y', '--assume-yes',
+            default=False,
+            action='store_true',
+            help='Default yes in answer to all confirmation questions.'
+        )
+        group.add_option(
+            '-k', '--keep-tmp',
+            default=False,
+            action='store_true',
+            help='Do not remove files from /tmp/ after deploy.sh finishes.'
+        )
+        group.add_option(
+            '--show-deploy-args',
+            default=False,
+            action='store_true',
+            help='Include the options used to deploy the minion in the data '
+                 'returned.'
+        )
+        group.add_option(
+            '--script-args',
+            default=None,
+            help='Script arguments to be fed to the bootstrap script when '
+                 'deploying the VM'
+        )
+        self.add_option_group(group)
+
+    def process_function(self):
+        if self.options.function:
+            self.function_name, self.function_provider = self.options.function
+            if self.function_provider.startswith('-') or \
+                    '=' in self.function_provider:
+                self.error(
+                    '--function expects two arguments: <function-name> '
+                    '<provider>'
+                )
+
+
+class CloudQueriesMixIn(object):
+    __metaclass__ = MixInMeta
+    _mixin_prio_ = 20
+
+    selected_query_option = None
+
+    def _mixin_setup(self):
+        group = self.cloud_queries_group = optparse.OptionGroup(
+            self,
+            'Query Options',
+            # Include description here as a string
+        )
+        group.add_option(
+            '-Q', '--query',
+            default=False,
+            action='store_true',
+            help=('Execute a query and return some information about the '
+                  'nodes running on configured cloud providers')
+        )
+        group.add_option(
+            '-F', '--full-query',
+            default=False,
+            action='store_true',
+            help=('Execute a query and return all information about the '
+                  'nodes running on configured cloud providers')
+        )
+        group.add_option(
+            '-S', '--select-query',
+            default=False,
+            action='store_true',
+            help=('Execute a query and return select information about '
+                  'the nodes running on configured cloud providers')
+        )
+        group.add_option(
+            '--list-providers',
+            default=False,
+            action='store_true',
+            help=('Display a list of configured providers.')
+        )
+        self.add_option_group(group)
+        self._create_process_functions()
+
+    def _create_process_functions(self):
+        for option in self.cloud_queries_group.option_list:
+            def process(opt):
+                if getattr(self.options, opt.dest):
+                    query = 'list_nodes'
+                    if opt.dest == 'full_query':
+                        query += '_full'
+                    elif opt.dest == 'select_query':
+                        query += '_select'
+                    elif opt.dest == 'list_providers':
+                        query = 'list_providers'
+                        if self.args:
+                            self.error(
+                                '\'--list-providers\' does not accept any '
+                                'arguments'
+                            )
+                    self.selected_query_option = query
+
+            funcname = 'process_{0}'.format(option.dest)
+            if not hasattr(self, funcname):
+                setattr(self, funcname, partial(process, option))
+
+    def _mixin_after_parsed(self):
+        group_options_selected = filter(
+            lambda option: getattr(self.options, option.dest) is not False,
+            self.cloud_queries_group.option_list
+        )
+        if len(group_options_selected) > 1:
+            self.error(
+                'The options {0} are mutually exclusive. Please only choose '
+                'one of them'.format('/'.join([
+                    option.get_opt_string() for option in
+                    group_options_selected
+                ]))
+            )
+        self.config['selected_query_option'] = self.selected_query_option
+
+
+class CloudProvidersListsMixIn(object):
+    __metaclass__ = MixInMeta
+    _mixin_prio_ = 30
+
+    def _mixin_setup(self):
+        group = self.providers_listings_group = optparse.OptionGroup(
+            self,
+            'Cloud Providers Listings',
+            # Include description here as a string
+        )
+        group.add_option(
+            '--list-locations',
+            default=None,
+            help=('Display a list of locations available in configured cloud '
+                  'providers. Pass the cloud provider that available '
+                  'locations are desired on, aka "linode", or pass "all" to '
+                  'list locations for all configured cloud providers')
+        )
+        group.add_option(
+            '--list-images',
+            default=None,
+            help=('Display a list of images available in configured cloud '
+                  'providers. Pass the cloud provider that available images '
+                  'are desired on, aka "linode", or pass "all" to list images '
+                  'for all configured cloud providers')
+        )
+        group.add_option(
+            '--list-sizes',
+            default=None,
+            help=('Display a list of sizes available in configured cloud '
+                  'providers. Pass the cloud provider that available sizes '
+                  'are desired on, aka "AWS", or pass "all" to list sizes '
+                  'for all configured cloud providers')
+        )
+        self.add_option_group(group)
+
+    def _mixin_after_parsed(self):
+        list_options_selected = filter(
+            lambda option: getattr(self.options, option.dest) is not None,
+            self.providers_listings_group.option_list
+        )
+        if len(list_options_selected) > 1:
+            self.error(
+                'The options {0} are mutually exclusive. Please only choose '
+                'one of them'.format(
+                    '/'.join([
+                        option.get_opt_string() for option in
+                        list_options_selected
+                    ])
+                )
+            )
+
+
+class CloudCredentialsMixIn(object):
+    __metaclass__ = MixInMeta
+    _mixin_prio_ = 30
+
+    def _mixin_setup(self):
+        group = self.cloud_credentials_group = optparse.OptionGroup(
+            self,
+            'Cloud Credentials',
+            # Include description here as a string
+        )
+        group.add_option(
+            '--set-password',
+            default=None,
+            nargs=2,
+            metavar='<USERNAME> <PROVIDER>',
+            help=('Configure password for a cloud provider and save it to the keyring.'
+                  ' PROVIDER can be specified with or without a driver, for example:'
+                  ' "--set-password bob rackspace"'
+                  ' or more specific'
+                  ' "--set-password bob rackspace:openstack"'
+                  ' DEPRECATED!')
+        )
+        self.add_option_group(group)
+
+    def process_set_password(self):
+        if self.options.set_password:
+            raise RuntimeError(
+                    'This functionality is not supported; '
+                    'please see the keyring module at http://docs.saltstack.com/en/latest/topics/sdb/'
+            )
 
 
 class MasterOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
@@ -880,7 +1336,7 @@ class MasterOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
     # ConfigDirMixIn config filename attribute
     _config_filename_ = 'master'
     # LogLevelMixIn attributes
-    _default_logging_logfile_ = '/var/log/salt/master'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'master')
 
     def setup_config(self):
         return config.master_config(self.get_config_file_path())
@@ -897,10 +1353,11 @@ class MinionOptionParser(MasterOptionParser):
     # ConfigDirMixIn config filename attribute
     _config_filename_ = 'minion'
     # LogLevelMixIn attributes
-    _default_logging_logfile_ = '/var/log/salt/minion'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'minion')
 
     def setup_config(self):
-        return config.minion_config(self.get_config_file_path())
+        return config.minion_config(self.get_config_file_path(),
+                                    minion_id=True)
 
 
 class SyndicOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
@@ -917,7 +1374,7 @@ class SyndicOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
     # ConfigDirMixIn config filename attribute
     _config_filename_ = 'master'
     # LogLevelMixIn attributes
-    _default_logging_logfile_ = '/var/log/salt/master'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'master')
 
     def setup_config(self):
         return config.syndic_config(
@@ -927,7 +1384,7 @@ class SyndicOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
 class SaltCMDOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                           TimeoutMixIn, ExtendedTargetOptionsMixIn,
-                          OutputOptionsMixIn, LogLevelMixIn):
+                          OutputOptionsMixIn, LogLevelMixIn, HardCrashMixin):
 
     __metaclass__ = OptionParserMeta
 
@@ -940,7 +1397,7 @@ class SaltCMDOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
     # LogLevelMixIn attributes
     _default_logging_level_ = 'warning'
-    _default_logging_logfile_ = '/var/log/salt/master'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'master')
     _loglevel_config_setting_name_ = 'cli_salt_log_file'
 
     def _mixin_setup(self):
@@ -980,6 +1437,18 @@ class SaltCMDOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                   'queries')
         )
         self.add_option(
+            '--show-timeout',
+            default=False,
+            action='store_true',
+            help=('Display minions that timeout without the additional output of --verbose')
+        )
+        self.add_option(
+            '--show-jid',
+            default=False,
+            action='store_true',
+            help=('Display jid without the additional output of --verbose')
+        )
+        self.add_option(
             '-b', '--batch',
             '--batch-size',
             default='',
@@ -989,10 +1458,10 @@ class SaltCMDOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                   'minions to have running')
         )
         self.add_option(
-            '-a', '--auth', '--eauth', '--extended-auth',
+            '-a', '--auth', '--eauth', '--external-auth',
             default='',
             dest='eauth',
-            help=('Specify an extended authentication system to use.')
+            help=('Specify an external authentication system to use.')
         )
         self.add_option(
             '-T', '--make-token',
@@ -1029,12 +1498,37 @@ class SaltCMDOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                   'when one wants to pass commas as arguments to '
                   'some of the commands in a compound command.')
         )
+        self.add_option(
+            '--summary',
+            dest='cli_summary',
+            default=False,
+            action='store_true',
+            help=('Display summary information about a salt command')
+        )
+        self.add_option(
+            '--username',
+            dest='username',
+            nargs=1,
+            help=('Username for external authentication')
+        )
+        self.add_option(
+            '--password',
+            dest='password',
+            nargs=1,
+            help=('Password for external authentication')
+        )
 
     def _mixin_after_parsed(self):
-        # Catch invalid invocations of salt such as: salt run
         if len(self.args) <= 1 and not self.options.doc:
-            self.print_help()
-            self.exit(1)
+            try:
+                self.print_help()
+            except Exception:
+                # We get an argument that Python's optparser just can't deal
+                # with. Perhaps stdout was redirected, or a file glob was
+                # passed in. Regardless, we're in an unknown state here.
+                sys.stdout.write('Invalid options passed. Please try -h for '
+                                 'help.')  # Try to warn if we can.
+                sys.exit(salt.exitcodes.EX_GENERIC)
 
         if self.options.doc:
             # Include the target
@@ -1045,56 +1539,71 @@ class SaltCMDOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                 self.args.insert(1, 'sys.doc')
             if self.args[1] != 'sys.doc':
                 self.args.insert(1, 'sys.doc')
-                self.args[2] = self.args[2]
+            if len(self.args) > 3:
+                self.error('You can only get documentation for one method at one time.')
 
         if self.options.list:
-            if ',' in self.args[0]:
-                self.config['tgt'] = self.args[0].split(',')
-            else:
-                self.config['tgt'] = self.args[0].split()
+            try:
+                if ',' in self.args[0]:
+                    self.config['tgt'] = self.args[0].split(',')
+                else:
+                    self.config['tgt'] = self.args[0].split()
+            except IndexError:
+                self.exit(42, '\nCannot execute command without defining a target.\n\n')
         else:
-            self.config['tgt'] = self.args[0]
-
+            try:
+                self.config['tgt'] = self.args[0]
+            except IndexError:
+                self.exit(42, '\nCannot execute command without defining a target.\n\n')
         # Detect compound command and set up the data for it
-        if ',' in self.args[1]:
-            self.config['fun'] = self.args[1].split(',')
-            self.config['arg'] = [[]]
-            cmd_index = 0
-            if (self.args[2:].count(self.options.args_separator) ==
-                    len(self.config['fun']) - 1):
-                # new style parsing: standalone argument separator
-                for arg in self.args[2:]:
-                    if arg == self.options.args_separator:
-                        cmd_index += 1
-                        self.config['arg'].append([])
-                    else:
-                        self.config['arg'][cmd_index].append(arg)
-            else:
-                # old style parsing: argument separator can be inside args
-                for arg in self.args[2:]:
-                    if self.options.args_separator in arg:
-                        sub_args = arg.split(self.options.args_separator)
-                        for sub_arg_index, sub_arg in enumerate(sub_args):
-                            if sub_arg:
-                                self.config['arg'][cmd_index].append(sub_arg)
-                            if sub_arg_index != len(sub_args) - 1:
+        if self.args:
+            try:
+                if ',' in self.args[1]:
+                    self.config['fun'] = self.args[1].split(',')
+                    self.config['arg'] = [[]]
+                    cmd_index = 0
+                    if (self.args[2:].count(self.options.args_separator) ==
+                            len(self.config['fun']) - 1):
+                        # new style parsing: standalone argument separator
+                        for arg in self.args[2:]:
+                            if arg == self.options.args_separator:
                                 cmd_index += 1
                                 self.config['arg'].append([])
+                            else:
+                                self.config['arg'][cmd_index].append(arg)
                     else:
-                        self.config['arg'][cmd_index].append(arg)
-                if len(self.config['fun']) != len(self.config['arg']):
-                    self.exit(42, 'Cannot execute compound command without '
-                                  'defining all arguments.')
-        else:
-            self.config['fun'] = self.args[1]
-            self.config['arg'] = self.args[2:]
+                        # old style parsing: argument separator can be inside args
+                        for arg in self.args[2:]:
+                            if self.options.args_separator in arg:
+                                sub_args = arg.split(self.options.args_separator)
+                                for sub_arg_index, sub_arg in enumerate(sub_args):
+                                    if sub_arg:
+                                        self.config['arg'][cmd_index].append(sub_arg)
+                                    if sub_arg_index != len(sub_args) - 1:
+                                        cmd_index += 1
+                                        self.config['arg'].append([])
+                            else:
+                                self.config['arg'][cmd_index].append(arg)
+                        if len(self.config['fun']) != len(self.config['arg']):
+                            self.exit(42, 'Cannot execute compound command without '
+                                          'defining all arguments.\n')
+                else:
+                    self.config['fun'] = self.args[1]
+                    self.config['arg'] = self.args[2:]
+
+                # parse the args and kwargs before sending to the publish interface
+                self.config['arg'] = \
+                    salt.utils.args.parse_input(self.config['arg'])
+            except IndexError:
+                self.exit(42, '\nIncomplete options passed.\n\n')
 
     def setup_config(self):
         return config.client_config(self.get_config_file_path())
 
 
 class SaltCPOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
-                         TimeoutMixIn, TargetOptionsMixIn, LogLevelMixIn):
+                         TimeoutMixIn, TargetOptionsMixIn, LogLevelMixIn,
+                         HardCrashMixin):
     __metaclass__ = OptionParserMeta
 
     description = (
@@ -1112,14 +1621,14 @@ class SaltCPOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
     # LogLevelMixIn attributes
     _default_logging_level_ = 'warning'
-    _default_logging_logfile_ = '/var/log/salt/master'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'master')
     _loglevel_config_setting_name_ = 'cli_salt_cp_log_file'
 
     def _mixin_after_parsed(self):
         # salt-cp needs arguments
         if len(self.args) <= 1:
             self.print_help()
-            self.exit(1)
+            self.exit(os.EX_USAGE)
 
         if self.options.list:
             if ',' in self.args[0]:
@@ -1136,7 +1645,8 @@ class SaltCPOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
 
 class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
-                          LogLevelMixIn, OutputOptionsMixIn):
+                          LogLevelMixIn, OutputOptionsMixIn, RunUserMixin,
+                          HardCrashMixin):
 
     __metaclass__ = OptionParserMeta
 
@@ -1150,19 +1660,9 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
     # LogLevelMixIn attributes
     _skip_console_logging_config_ = True
     _logfile_config_setting_name_ = 'key_logfile'
-    _default_logging_logfile_ = '/var/log/salt/key'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'key')
 
     def _mixin_setup(self):
-        # XXX: Remove '--key-logfile' support in 0.18.0
-        utils.warn_until((0, 18), '', _dont_call_warnings=True)
-        self.logging_options_group.add_option(
-            '--key-logfile',
-            default=None,
-            help='Send all output to a file. Default is {0!r}'.format(
-                self._default_logging_logfile_
-            )
-        )
-
         actions_group = optparse.OptionGroup(self, 'Actions')
         actions_group.add_option(
             '-l', '--list',
@@ -1180,13 +1680,15 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
             '-L', '--list-all',
             default=False,
             action='store_true',
-            help='List all public keys. Deprecated: use "--list all"'
+            help='List all public keys. (Deprecated: use "--list all")'
         )
 
         actions_group.add_option(
             '-a', '--accept',
             default='',
-            help='Accept the following key'
+            help='Accept the specified public key (use --include-all to '
+                 'match rejected keys in addition to pending keys). Globs are '
+                 'supported.'
         )
 
         actions_group.add_option(
@@ -1199,7 +1701,9 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
         actions_group.add_option(
             '-r', '--reject',
             default='',
-            help='Reject the specified public key'
+            help='Reject the specified public key (use --include-all to '
+                 'match accepted keys in addition to pending keys). Globs are '
+                 'supported.'
         )
 
         actions_group.add_option(
@@ -1207,6 +1711,13 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
             default=False,
             action='store_true',
             help='Reject all pending keys'
+        )
+
+        actions_group.add_option(
+            '--include-all',
+            default=False,
+            action='store_true',
+            help='Include non-pending keys when accepting/rejecting'
         )
 
         actions_group.add_option(
@@ -1225,7 +1736,7 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
         actions_group.add_option(
             '-d', '--delete',
             default='',
-            help='Delete the named key'
+            help='Delete the specified key. Globs are supported.'
         )
 
         actions_group.add_option(
@@ -1238,14 +1749,14 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
         actions_group.add_option(
             '-f', '--finger',
             default='',
-            help='Print the named key\'s fingerprint'
+            help='Print the specified key\'s fingerprint'
         )
 
         actions_group.add_option(
             '-F', '--finger-all',
             default=False,
             action='store_true',
-            help='Print all key\'s fingerprints'
+            help='Print all keys\' fingerprints'
         )
         self.add_option_group(actions_group)
 
@@ -1290,9 +1801,49 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                   '; default=%default')
         )
 
+        key_options_group.add_option(
+            '--gen-signature',
+            default=False,
+            action='store_true',
+            help=('Create a signature file of the masters public-key named '
+                  'master_pubkey_signature. The signature can be send to a '
+                  'minion in the masters auth-reply and enables the minion '
+                  'to verify the masters public-key cryptographically. '
+                  'This requires a new signing-key-pair which can be auto-created '
+                  'with the --auto-create parameter')
+        )
+
+        key_options_group.add_option(
+            '--priv',
+            default='',
+            type=str,
+            help=('The private-key file to create a signature with')
+        )
+
+        key_options_group.add_option(
+            '--signature-path',
+            default='',
+            type=str,
+            help=('The path where the signature file should be written')
+        )
+
+        key_options_group.add_option(
+            '--pub',
+            default='',
+            type=str,
+            help=('The public-key file to create a signature for')
+        )
+
+        key_options_group.add_option(
+            '--auto-create',
+            default=False,
+            action='store_true',
+            help=('Auto-create a signing key-pair if it does not yet exist')
+        )
+
     def process_config_dir(self):
         if self.options.gen_keys:
-            # We're generating keys, override the default behaviour of this
+            # We're generating keys, override the default behavior of this
             # function if we don't have any access to the configuration
             # directory.
             if not os.access(self.options.config_dir, os.R_OK):
@@ -1302,7 +1853,7 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                     os.makedirs(self.options.gen_keys_dir)
                 self.options.config_dir = self.options.gen_keys_dir
         super(SaltKeyOptionParser, self).process_config_dir()
-    # Don't change it's mixin priority!
+    # Don't change its mixin priority!
     process_config_dir._mixin_prio_ = ConfigDirMixIn._mixin_prio_
 
     def setup_config(self):
@@ -1315,6 +1866,17 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
         return keys_config
 
+    def process_list(self):
+        # Filter accepted list arguments as soon as possible
+        if not self.options.list:
+            return
+        if not self.options.list.startswith(('acc', 'pre', 'un', 'rej', 'all')):
+            self.error(
+                '{0!r} is not a valid argument to \'--list\''.format(
+                    self.options.list
+                )
+            )
+
     def process_keysize(self):
         if self.options.keysize < 2048:
             self.error('The minimum value for keysize is 2048')
@@ -1325,16 +1887,6 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
         # Schedule __create_keys_dir() to run if there's a value for
         # --create-keys-dir
         self._mixin_after_parsed_funcs.append(self.__create_keys_dir)
-
-    def process_key_logfile(self):
-        if self.options.key_logfile:
-            # XXX: Remove '--key-logfile' support in 0.18.0
-            # In < 0.18.0 error out
-            utils.warn_until((0, 18), '', _dont_call_warnings=True)
-            self.error(
-                'The \'--key-logfile\' option has been deprecated in favour '
-                'of \'--log-file\''
-            )
 
     def _mixin_after_parsed(self):
         # It was decided to always set this to info, since it really all is
@@ -1347,7 +1899,7 @@ class SaltKeyOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
 
 class SaltCallOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
-                           LogLevelMixIn, OutputOptionsMixIn):
+                           LogLevelMixIn, OutputOptionsMixIn, HardCrashMixin):
     __metaclass__ = OptionParserMeta
 
     description = ('Salt call is used to execute module functions locally '
@@ -1360,7 +1912,7 @@ class SaltCallOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
     # LogLevelMixIn attributes
     _default_logging_level_ = 'info'
-    _default_logging_logfile_ = '/var/log/salt/minion'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'minion')
 
     def _mixin_setup(self):
         self.add_option(
@@ -1410,28 +1962,60 @@ class SaltCallOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
             help='Run salt-call locally, as if there was no master running.'
         )
         self.add_option(
+            '--file-root',
+            default=None,
+            help='Set this directory as the base file root.'
+        )
+        self.add_option(
+            '--pillar-root',
+            default=None,
+            help='Set this directory as the base pillar root.'
+        )
+        self.add_option(
             '--retcode-passthrough',
             default=False,
             action='store_true',
             help=('Exit with the salt call retcode and not the salt binary '
                   'retcode')
         )
+        self.add_option(
+            '--id',
+            default='',
+            dest='id',
+            help=('Specify the minion id to use. If this option is omitted, '
+                  'the id option from the minion config will be used.')
+        )
+        self.add_option(
+            '--skip-grains',
+            default=False,
+            action='store_true',
+            help=('Do not load grains.')
+        )
+        self.add_option(
+            '--refresh-grains-cache',
+            default=False,
+            action='store_true',
+            help=('Force a refresh of the grains cache')
+    )
 
     def _mixin_after_parsed(self):
-        if not self.args and not self.options.grains_run \
-                and not self.options.doc:
+        if not self.args and not self.options.grains_run and not self.options.doc:
             self.print_help()
-            self.exit(1)
+            self.exit(os.EX_USAGE)
 
         elif len(self.args) >= 1:
             if self.options.grains_run:
                 self.error('-g/--grains does not accept any arguments')
 
+            if self.options.doc and len(self.args) > 1:
+                self.error('You can only get documentation for one method at one time')
+
             self.config['fun'] = self.args[0]
             self.config['arg'] = self.args[1:]
 
     def setup_config(self):
-        return config.minion_config(self.get_config_file_path())
+        return config.minion_config(self.get_config_file_path(),
+                                    minion_id=True)
 
     def process_module_dirs(self):
         for module_dir in self.options.module_dirs:
@@ -1446,7 +2030,7 @@ class SaltCallOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
 
 class SaltRunOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
-                          TimeoutMixIn, LogLevelMixIn):
+                          TimeoutMixIn, LogLevelMixIn, HardCrashMixin):
     __metaclass__ = OptionParserMeta
 
     default_timeout = 1
@@ -1458,7 +2042,7 @@ class SaltRunOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
     # LogLevelMixIn attributes
     _default_logging_level_ = 'warning'
-    _default_logging_logfile_ = '/var/log/salt/master'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'master')
     _loglevel_config_setting_name_ = 'cli_salt_run_log_file'
 
     def _mixin_setup(self):
@@ -1467,11 +2051,32 @@ class SaltRunOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
             dest='doc',
             default=False,
             action='store_true',
-            help=('Display documentation for runners, pass a module or a '
-                  'runner to see documentation on only that module/runner.')
+            help=('Display documentation for runners, pass a runner or '
+                  'runner.function to see documentation on only that runner '
+                  'or function.')
+        )
+        group = self.output_options_group = optparse.OptionGroup(
+            self, 'Output Options', 'Configure your preferred output format'
+        )
+        self.add_option_group(group)
+
+        group.add_option(
+            '--no-color', '--no-colour',
+            default=False,
+            action='store_true',
+            help='Disable all colored output'
+        )
+        group.add_option(
+            '--force-color', '--force-colour',
+            default=False,
+            action='store_true',
+            help='Force colored output'
         )
 
     def _mixin_after_parsed(self):
+        if self.options.doc and len(self.args) > 1:
+            self.error('You can only get documentation for one method at one time')
+
         if len(self.args) > 0:
             self.config['fun'] = self.args[0]
         else:
@@ -1487,7 +2092,7 @@ class SaltRunOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
 class SaltSSHOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                           LogLevelMixIn, TargetOptionsMixIn,
-                          OutputOptionsMixIn):
+                          OutputOptionsMixIn, SaltfileMixIn, HardCrashMixin):
     __metaclass__ = OptionParserMeta
 
     usage = '%prog [options]'
@@ -1497,20 +2102,111 @@ class SaltSSHOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
 
     # LogLevelMixIn attributes
     _default_logging_level_ = 'warning'
-    _default_logging_logfile_ = '/var/log/salt/ssh'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'ssh')
     _loglevel_config_setting_name_ = 'cli_salt_run_log_file'
 
     def _mixin_setup(self):
         self.add_option(
-            '-d', '--doc', '--documentation',
-            dest='doc',
+            '-r', '--raw', '--raw-shell',
+            dest='raw_shell',
             default=False,
             action='store_true',
-            help=('Display documentation for runners, pass a module or a '
-                  'runner to see documentation on only that module/runner.')
+            help=('Don\'t execute a salt routine on the targets, execute a '
+                  'raw shell command')
+        )
+        self.add_option(
+            '--roster',
+            dest='roster',
+            default='',
+            help=('Define which roster system to use, this defines if a '
+                  'database backend, scanner, or custom roster system is '
+                  'used. Default is the flat file roster.')
+        )
+        self.add_option(
+            '--roster-file',
+            dest='roster_file',
+            default='',
+            help=('define an alternative location for the default roster '
+                  'file location. The default roster file is called roster '
+                  'and is found in the same directory as the master config '
+                  'file.')
+        )
+        self.add_option(
+            '--refresh', '--refresh-cache',
+            dest='refresh_cache',
+            default=False,
+            action='store_true',
+            help=('Force a refresh of the master side data cache of the '
+                  'target\'s data. This is needed if a target\'s grains have '
+                  'been changed and the auto refresh timeframe has not been '
+                  'reached.')
+        )
+        self.add_option(
+            '--max-procs',
+            dest='ssh_max_procs',
+            default=25,
+            type=int,
+            help='Set the number of concurrent minions to communicate with. '
+                 'This value defines how many processes are opened up at a '
+                 'time to manage connections, the more running processes the '
+                 'faster communication should be, default is %default'
+        )
+        self.add_option(
+            '-v', '--verbose',
+            default=False,
+            action='store_true',
+            help=('Turn on command verbosity, display jid')
         )
 
+        auth_group = optparse.OptionGroup(
+            self, 'Authentication Options',
+            'Parameters affecting authentication'
+        )
+        auth_group.add_option(
+            '--priv',
+            dest='ssh_priv',
+            help='Ssh private key file'
+        )
+        auth_group.add_option(
+            '-i',
+            '--ignore-host-keys',
+            dest='ignore_host_keys',
+            default=False,
+            action='store_true',
+            help='By default ssh host keys are honored and connections will '
+                 'ask for approval'
+        )
+        auth_group.add_option(
+            '--passwd',
+            dest='ssh_passwd',
+            default='',
+            help='Set the default password to attempt to use when '
+                 'authenticating'
+        )
+        auth_group.add_option(
+            '--askpass',
+            dest='ssh_askpass',
+            default=False,
+            action='store_true',
+            help='Interactively ask for the SSH password with no echo - avoids '
+                 'password in process args and stored in history'
+        )
+        auth_group.add_option(
+            '--key-deploy',
+            dest='ssh_key_deploy',
+            default=False,
+            action='store_true',
+            help='Set this flag to attempt to deploy the authorized ssh key '
+                 'with all minions. This combined with --passwd can make '
+                 'initial deployment of keys very fast and easy'
+        )
+        self.add_option_group(auth_group)
+
     def _mixin_after_parsed(self):
+        if not self.args:
+            self.print_help()
+            self.exit(os.EX_USAGE)
+
         if self.options.list:
             if ',' in self.args[0]:
                 self.config['tgt'] = self.args[0].split(',')
@@ -1518,8 +2214,65 @@ class SaltSSHOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                 self.config['tgt'] = self.args[0].split()
         else:
             self.config['tgt'] = self.args[0]
-        if len(self.args) > 0:
-            self.config['arg_str'] = ' '.join(self.args[1:])
+
+        self.config['argv'] = self.args[1:]
+
+        if self.options.ssh_askpass:
+            self.options.ssh_passwd = getpass.getpass('Password: ')
 
     def setup_config(self):
         return config.master_config(self.get_config_file_path())
+
+
+class SaltCloudParser(OptionParser,
+                      LogLevelMixIn,
+                      MergeConfigMixIn,
+                      OutputOptionsMixIn,
+                      ConfigDirMixIn,
+                      CloudQueriesMixIn,
+                      ExecutionOptionsMixIn,
+                      CloudProvidersListsMixIn,
+                      CloudCredentialsMixIn,
+                      HardCrashMixin):
+
+    __metaclass__ = OptionParserMeta
+
+    # ConfigDirMixIn attributes
+    _config_filename_ = 'cloud'
+
+    # LogLevelMixIn attributes
+    _default_logging_level_ = 'info'
+    _logfile_config_setting_name_ = 'log_file'
+    _loglevel_config_setting_name_ = 'log_level_logfile'
+    _default_logging_logfile_ = os.path.join(syspaths.LOGS_DIR, 'cloud')
+
+    def print_versions_report(self, file=sys.stdout):
+        print('\n'.join(version.versions_report(include_salt_cloud=True)),
+              file=file)
+        self.exit(os.EX_OK)
+
+    def parse_args(self, args=None, values=None):
+        try:
+            # Late import in order not to break setup
+            from salt.cloud import libcloudfuncs
+            libcloudfuncs.check_libcloud_version()
+        except ImportError as exc:
+            self.error(exc)
+        return super(SaltCloudParser, self).parse_args(args, values)
+
+    def _mixin_after_parsed(self):
+        if 'DUMP_SALT_CLOUD_CONFIG' in os.environ:
+            import pprint
+
+            print('Salt cloud configuration dump(INCLUDES SENSIBLE DATA):')
+            pprint.pprint(self.config)
+            self.exit(os.EX_OK)
+
+        if self.args:
+            self.config['names'] = self.args
+
+    def setup_config(self):
+        try:
+            return config.cloud_config(self.get_config_file_path())
+        except salt.cloud.exceptions.SaltCloudConfigError as exc:
+            self.error(exc)

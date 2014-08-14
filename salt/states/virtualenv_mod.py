@@ -1,39 +1,51 @@
+# -*- coding: utf-8 -*-
 '''
-Setup of Python virtualenv sandboxes.
-=====================================
+Setup of Python virtualenv sandboxes
+====================================
 
 '''
 
 # Import python libs
 import logging
 import os
+
+# Import salt libs
+import salt.version
 import salt.utils
 
 log = logging.getLogger(__name__)
 
+# Define the module's virtual name
+__virtualname__ = 'virtualenv'
+
 
 def __virtual__():
-    return 'virtualenv'
+    return __virtualname__
 
 
 def managed(name,
-            venv_bin='virtualenv',
+            venv_bin=None,
             requirements=None,
-            no_site_packages=None,
             system_site_packages=False,
             distribute=False,
+            use_wheel=False,
             clear=False,
             python=None,
             extra_search_dir=None,
             never_download=None,
             prompt=None,
-            __env__='base',
+            user=None,
             runas=None,
             no_chown=False,
             cwd=None,
             index_url=None,
             extra_index_url=None,
-            pre_releases=False):
+            pre_releases=False,
+            no_deps=False,
+            pip_download=None,
+            pip_download_cache=None,
+            pip_exists_action=None,
+            proxy=None):
     '''
     Create a virtualenv and optionally manage it with pip
 
@@ -41,9 +53,18 @@ def managed(name,
         Path to the virtualenv
     requirements
         Path to a pip requirements file. If the path begins with ``salt://``
-        the file will be transfered from the master file server.
+        the file will be transferred from the master file server.
     cwd
         Path to the working directory where "pip install" is executed.
+    use_wheel : False
+        Prefer wheel archives (requires pip>=1.4)
+    no_deps: False
+        Pass `--no-deps` to `pip`.
+    pip_exists_action: None
+        Default action of pip when a path already exists: (s)witch, (i)gnore,
+        (w)ipe, (b)ackup
+    proxy: None
+        Proxy address which is passed to "pip install"
 
     Also accepts any kwargs that the virtualenv module will.
 
@@ -56,10 +77,33 @@ def managed(name,
     '''
     ret = {'name': name, 'result': True, 'comment': '', 'changes': {}}
 
-    if not 'virtualenv.create' in __salt__:
+    if 'virtualenv.create' not in __salt__:
         ret['result'] = False
         ret['comment'] = 'Virtualenv was not detected on this system'
         return ret
+
+    if runas:
+        # Warn users about the deprecation
+        salt.utils.warn_until(
+            'Lithium',
+            'The support for \'runas\' is being deprecated in favor of '
+            '\'user\' and will be removed in Salt Beryllium. Please update '
+            'your state files.'
+        )
+    if user is not None and runas is not None:
+        # user wins over runas but let warn about the deprecation.
+        salt.utils.warn_until(
+            'Lithium',
+            'Passed both the \'runas\' and \'user\' arguments. \'runas\' is '
+            'being ignored in favor of \'user\' as the support for \'runas\' '
+            'is being deprecated in favor of \'user\' and will be removed in '
+            'Salt Beryllium. Please update your state files.'
+        )
+        runas = None
+    elif runas is not None:
+        # Support old runas usage
+        user = runas
+        runas = None
 
     if salt.utils.is_windows():
         venv_py = os.path.join(name, 'Scripts', 'python.exe')
@@ -116,7 +160,6 @@ def managed(name,
         _ret = __salt__['virtualenv.create'](
             name,
             venv_bin=venv_bin,
-            no_site_packages=no_site_packages,
             system_site_packages=system_site_packages,
             distribute=distribute,
             clear=clear,
@@ -124,7 +167,7 @@ def managed(name,
             extra_search_dir=extra_search_dir,
             never_download=never_download,
             prompt=prompt,
-            runas=runas
+            user=user
         )
 
         ret['result'] = _ret['retcode'] == 0
@@ -139,16 +182,35 @@ def managed(name,
     elif venv_exists:
         ret['comment'] = 'virtualenv exists'
 
+    if use_wheel:
+        min_version = '1.4'
+        cur_version = __salt__['pip.version'](bin_env=name)
+        if not salt.utils.compare_versions(ver1=cur_version, oper='>=',
+                                           ver2=min_version):
+            ret['result'] = False
+            ret['comment'] = ('The \'use_wheel\' option is only supported in '
+                              'pip {0} and newer. The version of pip detected '
+                              'was {1}.').format(min_version, cur_version)
+            return ret
+
     # Populate the venv via a requirements file
     if requirements:
         before = set(__salt__['pip.freeze'](bin_env=name))
         _ret = __salt__['pip.install'](
-            requirements=requirements, bin_env=name, runas=runas, cwd=cwd,
+            requirements=requirements,
+            bin_env=name,
+            use_wheel=use_wheel,
+            user=user,
+            cwd=cwd,
             index_url=index_url,
             extra_index_url=extra_index_url,
+            download=pip_download,
+            download_cache=pip_download_cache,
             no_chown=no_chown,
-            __env__=__env__,
-            pre_releases=pre_releases
+            pre_releases=pre_releases,
+            exists_action=pip_exists_action,
+            no_deps=no_deps,
+            proxy=proxy,
         )
         ret['result'] &= _ret['retcode'] == 0
         if _ret['retcode'] > 0:

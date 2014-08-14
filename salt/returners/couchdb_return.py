@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Simple returner for CouchDB. Optional configuration
 settings are listed below, along with sane defaults.
@@ -5,6 +6,9 @@ settings are listed below, along with sane defaults.
 couchdb.db:     'salt'
 couchdb.url:        'http://salt:5984/'
 
+  To use the couchdb returner, append '--return couchdb' to the salt command. ex:
+
+    salt '*' test.ping --return couchdb
 '''
 import logging
 import time
@@ -13,9 +17,12 @@ import json
 
 log = logging.getLogger(__name__)
 
+# Define the module's virtual name
+__virtualname__ = 'couchdb'
+
 
 def __virtual__():
-    return 'couchdb'
+    return __virtualname__
 
 
 def _get_options():
@@ -85,7 +92,7 @@ def returner(ret):
         _response = _request("PUT", options['url'] + options['db'])
 
         # Confirm that the response back was simple 'ok': true.
-        if not 'ok' in _response or _response['ok'] is not True:
+        if 'ok' not in _response or _response['ok'] is not True:
             return log.error('Unable to create database "{0}"'
                              .format(options['db']))
         log.info('Created database "{0}"'.format(options['db']))
@@ -101,7 +108,7 @@ def returner(ret):
                          json.dumps(doc))
 
     # Santiy check regarding the response..
-    if not 'ok' in _response or _response['ok'] is not True:
+    if 'ok' not in _response or _response['ok'] is not True:
         log.error('Unable to create document: "{0}"'.format(_response))
 
 
@@ -125,7 +132,7 @@ def get_jids():
     _response = _request("GET", options['url'] + options['db'] + "/_all_docs")
 
     # Make sure the 'total_rows' is returned.. if not error out.
-    if not 'total_rows' in _response:
+    if 'total_rows' not in _response:
         log.error('Didn\'t get valid response from requesting all docs: {0}'
                   .format(_response))
         return []
@@ -213,7 +220,7 @@ def get_minions():
                                  "/_design/salt/_view/minions?group=true")
 
     # Verify that we got a response back.
-    if not 'rows' in _response:
+    if 'rows' not in _response:
         log.error('Unable to get available minions: {0}'.format(_response))
         return []
 
@@ -246,7 +253,7 @@ def ensure_views():
     # set_salt_view will set all the views, so we don't need to continue t
     # check.
     for view in get_valid_salt_views():
-        if not view in _response['views']:
+        if view not in _response['views']:
             return set_salt_view()
 
     # Valid views, return true.

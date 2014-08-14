@@ -10,7 +10,9 @@ Full list of builtin auth modules
     :toctree:
     :template: autosummary.rst.tmpl
 
+    auto
     keystone
     ldap
     pam
+    pki
     stormpath_mod

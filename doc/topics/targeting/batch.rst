@@ -1,8 +1,10 @@
+.. _targeting-batch:
+
 Batch Size
 ----------
 
 The ``-b`` (or ``--batch-size``) option allows commands to be executed on only
-a specifed number of minions at a time. Both percentages and finite numbers are
+a specified number of minions at a time. Both percentages and finite numbers are
 supported.
 
 .. code-block:: bash

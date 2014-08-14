@@ -1,10 +1,10 @@
+# -*- coding: utf-8 -*-
 '''
-Management of MySQL databases (schemas).
-========================================
+Management of MySQL databases (schemas)
+=======================================
 
-NOTE: This module requires the MySQLdb python module and the proper
-settings in the minion config file.
-See salt.modules.mysql for more information.
+:depends:   - MySQLdb Python module
+:configuration: See :py:mod:`salt.modules.mysql` for setup instructions.
 
 The mysql_database module is used to create and manage MySQL databases.
 Databases can be set as either absent or present.
@@ -22,7 +22,7 @@ def __virtual__():
     '''
     Only load if the mysql module is available in __salt__
     '''
-    return 'mysql_database' if 'mysql.db_exists' in __salt__ else False
+    return 'mysql.db_exists' in __salt__
 
 
 def _get_mysql_error():

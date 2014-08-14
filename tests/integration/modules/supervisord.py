@@ -1,25 +1,29 @@
+# -*- coding: utf-8 -*-
+
 # Import python
 import os
 import time
 import subprocess
 
 # Import Salt Testing libs
+from salttesting import skipIf
 from salttesting.helpers import ensure_in_syspath
 ensure_in_syspath('../../')
 
 # Import salt libs
 import integration
+import salt.utils
+from salt.modules.virtualenv_mod import KNOWN_BINARY_NAMES
 
 
+@skipIf(salt.utils.which_bin(KNOWN_BINARY_NAMES) is None, 'virtualenv not installed')
+@skipIf(salt.utils.which('supervisorctl') is None, 'supervisord not installed')
 class SupervisordModuleTest(integration.ModuleCase):
     '''
     Validates the supervisorctl functions.
     '''
     def setUp(self):
         super(SupervisordModuleTest, self).setUp()
-        ret = self.run_function('cmd.has_exec', ['virtualenv'])
-        if not ret:
-            self.skipTest('virtualenv not installed')
 
         self.venv_test_dir = os.path.join(integration.TMP, 'supervisortests')
         self.venv_dir = os.path.join(self.venv_test_dir, 'venv')
@@ -80,9 +84,8 @@ class SupervisordModuleTest(integration.ModuleCase):
         ret = self.run_function(
             'supervisord.start', [], conf_file=self.supervisor_conf,
             bin_env=self.venv_dir)
-        self.assertEqual(
-            ret, 'sleep_service: started\nsleep_service2: started'
-        )
+        self.assertIn('sleep_service: started', ret)
+        self.assertIn('sleep_service2: started', ret)
 
     def test_start_all_already_running(self):
         '''
@@ -123,10 +126,10 @@ class SupervisordModuleTest(integration.ModuleCase):
         ret = self.run_function(
             'supervisord.restart', [], conf_file=self.supervisor_conf,
             bin_env=self.venv_dir)
-        self.assertEqual(
-            ret,
-            'sleep_service: stopped\nsleep_service2: stopped\nsleep_service: '
-            'started\nsleep_service2: started')
+        self.assertIn('sleep_service: stopped', ret)
+        self.assertIn('sleep_service2: stopped', ret)
+        self.assertIn('sleep_service: started', ret)
+        self.assertIn('sleep_service2: started', ret)
 
     def test_restart_all_not_running(self):
         '''
@@ -136,8 +139,9 @@ class SupervisordModuleTest(integration.ModuleCase):
         ret = self.run_function(
             'supervisord.restart', [], conf_file=self.supervisor_conf,
             bin_env=self.venv_dir)
-        self.assertEqual(
-            ret, 'sleep_service: started\nsleep_service2: started')
+        # These 2 services might return in different orders so test separately
+        self.assertIn('sleep_service: started', ret)
+        self.assertIn('sleep_service2: started', ret)
 
     def test_restart_one(self):
         '''
@@ -157,8 +161,8 @@ class SupervisordModuleTest(integration.ModuleCase):
         ret = self.run_function(
             'supervisord.restart', ['sleep_service'],
             conf_file=self.supervisor_conf, bin_env=self.venv_dir)
-        self.assertEqual(
-            ret, 'sleep_service: ERROR (not running)\nsleep_service: started')
+        self.assertIn('sleep_service: ERROR (not running)', ret)
+        self.assertIn('sleep_service: started', ret)
 
     def test_stop_all(self):
         '''
@@ -169,6 +173,7 @@ class SupervisordModuleTest(integration.ModuleCase):
             'supervisord.stop', [], conf_file=self.supervisor_conf,
             bin_env=self.venv_dir)
         self.assertIn('sleep_service: stopped', ret)
+        self.assertIn('sleep_service2: stopped', ret)
 
     def test_stop_all_not_running(self):
         '''

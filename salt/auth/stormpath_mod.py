@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Salt Stormpath Authentication
 
@@ -22,15 +23,18 @@ try:
 except ImportError:
     HAS_STORMPATH = False
 
+# Define the module's virtual name
+__virtualname__ = 'stormpath'
+
 
 def __virtual__():
     '''
     Only load if stormpath is installed
     '''
     if HAS_STORMPATH:
-        return 'stormpath'
-    else:
-        return False
+        return __virtualname__
+    return False
+
 
 def auth(username, password):
     '''

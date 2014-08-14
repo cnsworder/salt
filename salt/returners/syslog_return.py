@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Return data to the host operating system's syslog facility
 
@@ -5,6 +6,11 @@ Required python modules: syslog, json
 
 The syslog returner simply reuses the operating system's syslog
 facility to log return data
+
+To use the syslog returner, append '--return syslog' to the salt command. ex:
+
+    salt '*' test.ping --return syslog
+
 '''
 
 # Import python libs
@@ -15,11 +21,14 @@ try:
 except ImportError:
     HAS_SYSLOG = False
 
+# Define the module's virtual name
+__virtualname__ = 'syslog'
+
 
 def __virtual__():
     if not HAS_SYSLOG:
         return False
-    return 'syslog'
+    return __virtualname__
 
 
 def returner(ret):

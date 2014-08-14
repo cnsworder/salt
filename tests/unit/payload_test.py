@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     tests.unit.payload_test
     ~~~~~~~~~~~~~~~~~~~~~~~
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2013 by the SaltStack Team, see AUTHORS for more details.
-    :license: Apache 2.0, see LICENSE for more details.
 '''
 
 # Import Salt Testing libs
 from salttesting import skipIf, TestCase
 from salttesting.helpers import ensure_in_syspath, MockWraps
+from salttesting.mock import NO_MOCK, NO_MOCK_REASON, patch
 ensure_in_syspath('../')
 
 # Import salt libs
@@ -19,14 +19,9 @@ from salt.utils.odict import OrderedDict
 
 # Import 3rd-party libs
 import msgpack
-try:
-    from mock import MagicMock, patch, DEFAULT
-    HAS_MOCK = True
-except ImportError:
-    HAS_MOCK = False
 
 
-@skipIf(HAS_MOCK is False, 'mock python module is unavailable')
+@skipIf(NO_MOCK, NO_MOCK_REASON)
 class PayloadTestCase(TestCase):
 
     def assertNoOrderedDict(self, data):
@@ -51,3 +46,8 @@ class PayloadTestCase(TestCase):
             odata = payload.loads(payload.dumps(idata.copy()))
             self.assertNoOrderedDict(odata)
             self.assertEqual(idata, odata)
+
+
+if __name__ == '__main__':
+    from integration import run_tests
+    run_tests(PayloadTestCase, needs_daemon=False)

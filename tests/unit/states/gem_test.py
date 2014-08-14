@@ -1,22 +1,18 @@
+# -*- coding: utf-8 -*-
+
 # Import Salt Testing libs
 from salttesting import skipIf, TestCase
 from salttesting.helpers import ensure_in_syspath
+from salttesting.mock import NO_MOCK, NO_MOCK_REASON, MagicMock, patch
 ensure_in_syspath('../../')
 
-# Import external libs
-try:
-    from mock import MagicMock, patch
-    has_mock = True
-except ImportError:
-    has_mock = False
-
-# Late import so mock can do it's job
+# Late import so mock can do its job
 import salt.states.gem as gem
 gem.__salt__ = {}
 gem.__opts__ = {'test': False}
 
 
-@skipIf(has_mock is False, 'mock python module is unavailable')
+@skipIf(NO_MOCK, NO_MOCK_REASON)
 class TestGemState(TestCase):
 
     def test_installed(self):
@@ -33,8 +29,8 @@ class TestGemState(TestCase):
                 ret = gem.installed('quux')
                 self.assertEqual(True, ret['result'])
                 gem_install_succeeds.assert_called_once_with(
-                    'quux', ruby=None, runas=None, version=None, rdoc=False,
-                    ri=False
+                    'quux', pre_releases=False, ruby=None, runas=None,
+                    version=None, rdoc=False, ri=False
                 )
 
             with patch.dict(gem.__salt__,
@@ -42,8 +38,8 @@ class TestGemState(TestCase):
                 ret = gem.installed('quux')
                 self.assertEqual(False, ret['result'])
                 gem_install_fails.assert_called_once_with(
-                    'quux', ruby=None, runas=None, version=None, rdoc=False,
-                    ri=False
+                    'quux', pre_releases=False, ruby=None, runas=None,
+                    version=None, rdoc=False, ri=False
                 )
 
     def test_removed(self):

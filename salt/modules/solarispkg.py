@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Package support for Solaris
 '''
@@ -9,9 +10,12 @@ import logging
 
 # Import salt libs
 import salt.utils
-
+from salt.exceptions import CommandExecutionError, MinionError
 
 log = logging.getLogger(__name__)
+
+# Define the module's virtual name
+__virtualname__ = 'pkg'
 
 
 def __virtual__():
@@ -19,7 +23,7 @@ def __virtual__():
     Set the virtual pkg module if the os is Solaris
     '''
     if __grains__['os'] == 'Solaris':
-        return 'pkg'
+        return __virtualname__
     return False
 
 
@@ -67,13 +71,16 @@ def list_pkgs(versions_as_list=False, **kwargs):
 
         {'<package_name>': '<version>'}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' pkg.list_pkgs
     '''
     versions_as_list = salt.utils.is_true(versions_as_list)
-    # 'removed' not yet implemented or not applicable
-    if salt.utils.is_true(kwargs.get('removed')):
+    # not yet implemented or not applicable
+    if any([salt.utils.is_true(kwargs.get(x))
+            for x in ('removed', 'purge_desired')]):
         return {}
 
     if 'pkg.list_pkgs' in __context__:
@@ -90,12 +97,12 @@ def list_pkgs(versions_as_list=False, **kwargs):
     # Package information returned two lines per package. On even-offset
     # lines, the package name is in the first column. On odd-offset lines, the
     # package version is in the second column.
-    lines = __salt__['cmd.run'](cmd).splitlines()
-    for index in range(0, len(lines)):
+    lines = __salt__['cmd.run'](cmd, output_loglevel='trace').splitlines()
+    for index, line in enumerate(lines):
         if index % 2 == 0:
-            name = lines[index].split()[0].strip()
+            name = line.split()[0].strip()
         if index % 2 == 1:
-            version_num = lines[index].split()[1].strip()
+            version_num = line.split()[1].strip()
             __salt__['pkg_resource.add_pkg'](ret, name, version_num)
 
     __salt__['pkg_resource.sort_pkglist'](ret)
@@ -114,7 +121,9 @@ def latest_version(*names, **kwargs):
     If the latest version of a given package is already installed, an empty
     string will be returned for that package.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' pkg.latest_version <package name>
         salt '*' pkg.latest_version <package1> <package2> <package3> ...
@@ -123,8 +132,10 @@ def latest_version(*names, **kwargs):
     pkgadd, this function will always return an empty string for a given
     package.
     '''
+    kwargs.pop('refresh', True)
+
     ret = {}
-    if len(names) == 0:
+    if not names:
         return ''
     for name in names:
         ret[name] = ''
@@ -142,7 +153,9 @@ def upgrade_available(name):
     '''
     Check whether or not an upgrade is available for a given package
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' pkg.upgrade_available <package name>
     '''
@@ -155,7 +168,9 @@ def version(*names, **kwargs):
     installed. If more than one package name is specified, a dict of
     name/version pairs is returned.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' pkg.version <package name>
         salt '*' pkg.version <package1> <package2> <package3> ...
@@ -163,7 +178,7 @@ def version(*names, **kwargs):
     return __salt__['pkg_resource.version'](*names, **kwargs)
 
 
-def install(name=None, sources=None, **kwargs):
+def install(name=None, sources=None, saltenv='base', **kwargs):
     '''
     Install the passed package. Can install packages from the following
     sources::
@@ -178,18 +193,18 @@ def install(name=None, sources=None, **kwargs):
         {'<package>': {'old': '<old-version>',
                        'new': '<new-version>'}}
 
-    CLI Example, installing a datastream pkg that already exists on the
+    CLI Example, installing a data stream pkg that already exists on the
     minion::
 
         salt '*' pkg.install sources='[{"<pkg name>": "/dir/on/minion/<pkg filename>"}]'
         salt '*' pkg.install sources='[{"SMClgcc346": "/var/spool/pkg/gcc-3.4.6-sol10-sparc-local.pkg"}]'
 
-    CLI Example, installing a datastream pkg that exists on the salt master::
+    CLI Example, installing a data stream pkg that exists on the salt master::
 
         salt '*' pkg.install sources='[{"<pkg name>": "salt://pkgs/<pkg filename>"}]'
         salt '*' pkg.install sources='[{"SMClgcc346": "salt://pkgs/gcc-3.4.6-sol10-sparc-local.pkg"}]'
 
-    CLI Example, installing a datastream pkg that exists on a HTTP server::
+    CLI Example, installing a data stream pkg that exists on a HTTP server::
 
         salt '*' pkg.install sources='[{"<pkg name>": "http://packages.server.com/<pkg filename>"}]'
         salt '*' pkg.install sources='[{"SMClgcc346": "http://packages.server.com/gcc-3.4.6-sol10-sparc-local.pkg"}]'
@@ -201,12 +216,12 @@ def install(name=None, sources=None, **kwargs):
     package in the global zone is to install it in all zones. This overrides
     that and installs the package only in the global.
 
-    CLI Example, installing a datastream package only in the global zone::
+    CLI Example, installing a data stream package only in the global zone::
 
         salt 'global_zone' pkg.install sources='[{"SMClgcc346": "/var/spool/pkg/gcc-3.4.6-sol10-sparc-local.pkg"}]' current_zone_only=True
 
     By default salt automatically provides an adminfile, to automate package
-    installation, with these options set:
+    installation, with these options set::
 
         email=
         instance=quit
@@ -267,11 +282,14 @@ def install(name=None, sources=None, **kwargs):
         log.warning('\'refresh\' argument not implemented for solarispkg '
                     'module')
 
-    pkg_params, pkg_type = \
-        __salt__['pkg_resource.parse_targets'](name,
-                                               kwargs.get('pkgs'),
-                                               sources,
-                                               **kwargs)
+    # pkgs is not supported, but must be passed here for API compatibility
+    pkgs = kwargs.pop('pkgs', None)
+    try:
+        pkg_params, pkg_type = __salt__['pkg_resource.parse_targets'](
+            name, pkgs, sources, **kwargs
+        )
+    except MinionError as exc:
+        raise CommandExecutionError(exc)
 
     if pkg_params is None or len(pkg_params) == 0:
         return {}
@@ -281,7 +299,7 @@ def install(name=None, sources=None, **kwargs):
         return {}
 
     if 'admin_source' in kwargs:
-        adminfile = __salt__['cp.cache_file'](kwargs['admin_source'])
+        adminfile = __salt__['cp.cache_file'](kwargs['admin_source'], saltenv)
     else:
         adminfile = _write_adminfile(kwargs)
 
@@ -295,24 +313,24 @@ def install(name=None, sources=None, **kwargs):
     for pkg in pkg_params:
         temp_cmd = cmd + '-d {0} "all"'.format(pkg)
         # Install the package{s}
-        __salt__['cmd.run_all'](temp_cmd)
+        __salt__['cmd.run'](temp_cmd, output_loglevel='trace')
 
     __context__.pop('pkg.list_pkgs', None)
     new = list_pkgs()
 
     # Remove the temp adminfile
-    if not 'admin_source' in kwargs:
+    if 'admin_source' not in kwargs:
         os.unlink(adminfile)
 
-    return __salt__['pkg_resource.find_changes'](old, new)
+    return salt.utils.compare_dicts(old, new)
 
 
-def remove(name=None, pkgs=None, **kwargs):
+def remove(name=None, pkgs=None, saltenv='base', **kwargs):
     '''
     Remove packages with pkgrm
 
     name
-        The name of the package to be deleted.
+        The name of the package to be deleted
 
     By default salt automatically provides an adminfile, to automate package
     removal, with these options set::
@@ -335,7 +353,9 @@ def remove(name=None, pkgs=None, **kwargs):
     providing your own adminfile to the minions.
 
     Note: You can find all of the possible options to provide to the adminfile
-    by reading the admin man page::
+    by reading the admin man page:
+
+    .. code-block:: bash
 
         man -s 4 admin
 
@@ -351,21 +371,27 @@ def remove(name=None, pkgs=None, **kwargs):
 
     Returns a dict containing the changes.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' pkg.remove <package name>
         salt '*' pkg.remove SUNWgit
         salt '*' pkg.remove <package1>,<package2>,<package3>
         salt '*' pkg.remove pkgs='["foo", "bar"]'
     '''
-    pkg_params = __salt__['pkg_resource.parse_targets'](name, pkgs)[0]
+    try:
+        pkg_params = __salt__['pkg_resource.parse_targets'](name, pkgs)[0]
+    except MinionError as exc:
+        raise CommandExecutionError(exc)
+
     old = list_pkgs()
     targets = [x for x in pkg_params if x in old]
     if not targets:
         return {}
 
     if 'admin_source' in kwargs:
-        adminfile = __salt__['cp.cache_file'](kwargs['admin_source'])
+        adminfile = __salt__['cp.cache_file'](kwargs['admin_source'], saltenv)
     else:
         # Set the adminfile default variables
         email = kwargs.get('email', '')
@@ -400,13 +426,13 @@ def remove(name=None, pkgs=None, **kwargs):
     # Remove the package
     cmd = '/usr/sbin/pkgrm -n -a {0} {1}'.format(adminfile,
                                                  ' '.join(targets))
-    __salt__['cmd.run_all'](cmd)
+    __salt__['cmd.run'](cmd, output_loglevel='trace')
     # Remove the temp adminfile
-    if not 'admin_source' in kwargs:
+    if 'admin_source' not in kwargs:
         os.unlink(adminfile)
     __context__.pop('pkg.list_pkgs', None)
     new = list_pkgs()
-    return __salt__['pkg_resource.find_changes'](old, new)
+    return salt.utils.compare_dicts(old, new)
 
 
 def purge(name=None, pkgs=None, **kwargs):
@@ -415,7 +441,7 @@ def purge(name=None, pkgs=None, **kwargs):
     ``remove()``.
 
     name
-        The name of the package to be deleted.
+        The name of the package to be deleted
 
 
     Multiple Package Options:
@@ -429,7 +455,9 @@ def purge(name=None, pkgs=None, **kwargs):
 
     Returns a dict containing the changes.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' pkg.purge <package name>
         salt '*' pkg.purge <package1>,<package2>,<package3>

@@ -1,5 +1,9 @@
+# -*- coding: utf-8 -*-
 '''
-Manage libvirt certs. This state uses the external pillar in the master to call
+Manage libvirt certificates
+===========================
+
+This state uses the external pillar in the master to call
 for the generation and signing of certificates for systems running libvirt:
 
 .. code-block:: yaml
@@ -23,7 +27,7 @@ def keys(name, basepath='/etc/pki'):
         The name variable used to track the execution
 
     basepath
-        Defaults to `/etc/pki`, this is the root location used for libvirt
+        Defaults to ``/etc/pki``, this is the root location used for libvirt
         keys on the hypervisor
     '''
     #libvirt.serverkey.pem

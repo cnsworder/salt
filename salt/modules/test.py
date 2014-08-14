@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for running arbitrary tests
 '''
@@ -6,6 +7,8 @@ Module for running arbitrary tests
 import os
 import sys
 import time
+import traceback
+import hashlib
 import random
 
 # Import Salt libs
@@ -13,12 +16,16 @@ import salt
 import salt.version
 import salt.loader
 
+__proxyenabled__ = ['*']
+
 
 def echo(text):
     '''
     Return a string - used for testing the connection
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.echo 'foo bar baz quo qux'
     '''
@@ -27,14 +34,21 @@ def echo(text):
 
 def ping():
     '''
-    Just used to make sure the minion is up and responding
-    Return True
+    Used to make sure the minion is up and responding. Not an ICMP ping.
 
-    CLI Example::
+    Returns ``True``.
+
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.ping
     '''
-    return True
+
+    if 'proxyobject' in __opts__:
+        return __opts__['proxyobject'].ping()
+    else:
+        return True
 
 
 def sleep(length):
@@ -42,7 +56,9 @@ def sleep(length):
     Instruct the minion to initiate a process that will sleep for a given
     period of time.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.sleep 20
     '''
@@ -55,7 +71,9 @@ def rand_sleep(max=60):
     Sleep for a random number of seconds, used to test long-running commands
     and minions returning at differing intervals
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.rand_sleep 60
     '''
@@ -67,7 +85,9 @@ def version():
     '''
     Return the version of salt on the minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.version
     '''
@@ -78,7 +98,9 @@ def versions_information():
     '''
     Returns versions of components used by salt as a dict
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.versions_information
     '''
@@ -89,7 +111,9 @@ def versions_report():
     '''
     Returns versions of components used by salt
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.versions_report
     '''
@@ -101,7 +125,9 @@ def conf_test():
     Return the value for test.foo in the minion configuration file, or return
     the default value
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.conf_test
     '''
@@ -112,7 +138,9 @@ def get_opts():
     '''
     Return the configuration options passed to this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.get_opts
     '''
@@ -125,7 +153,9 @@ def cross_test(func, args=None):
     module, used to verify that the minion functions can be called
     via the __salt__ module.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.cross_test file.gid_to_group 0
     '''
@@ -140,7 +170,9 @@ def kwarg(**kwargs):
     both test the publication data and cli kwarg passing, but also to display
     the information available within the publication data.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.kwarg num=1 txt="two" env='{a: 1, b: "hello"}'
     '''
@@ -154,11 +186,36 @@ def arg(*args, **kwargs):
     also to display the information available within the publication data.
     Returns {"args": args, "kwargs": kwargs}.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.arg 1 "two" 3.1 txt="hello" wow='{a: 1, b: "hello"}'
     '''
     return {"args": args, "kwargs": kwargs}
+
+
+def arg_type(*args, **kwargs):
+    '''
+    Print out the types of the args and kwargs. This is used to test the types
+    of the args and kwargs passed down to the minion
+
+    CLI Example:
+
+    .. code-block:: bash
+
+           salt '*' test.arg_type 1 'int'
+    '''
+    ret = {'args': [], 'kwargs': {}}
+    # all the args
+    for argument in args:
+        ret['args'].append(str(type(argument)))
+
+    # all the kwargs
+    for key, val in kwargs.iteritems():
+        ret['kwargs'][key] = str(type(val))
+
+    return ret
 
 
 def arg_repr(*args, **kwargs):
@@ -168,7 +225,9 @@ def arg_repr(*args, **kwargs):
     also to display the information available within the publication data.
     Returns {"args": repr(args), "kwargs": repr(kwargs)}.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.arg_repr 1 "two" 3.1 txt="hello" wow='{a: 1, b: "hello"}'
     '''
@@ -180,7 +239,9 @@ def fib(num):
     Return a Fibonacci sequence up to the passed number, and the
     timeit took to compute in seconds. Used for performance tests
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.fib 3
     '''
@@ -200,7 +261,9 @@ def collatz(start):
     returns the sequence and the time it took to compute. Used for
     performance tests.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.collatz 3
     '''
@@ -221,7 +284,9 @@ def outputter(data):
     '''
     Test the outputter, pass in data to return
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.outputter foobar
     '''
@@ -232,7 +297,9 @@ def retcode(code=42):
     '''
     Test that the returncode system is functioning correctly
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.retcode 42
     '''
@@ -244,7 +311,9 @@ def provider(module):
     '''
     Pass in a function name to discover what provider is being used
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.provider service
     '''
@@ -265,7 +334,9 @@ def providers():
     '''
     Return a dict of the provider names and the files that provided them
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.providers
     '''
@@ -281,7 +352,9 @@ def not_loaded():
     '''
     List the modules that were not loaded by the salt loader system
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.not_loaded
     '''
@@ -308,7 +381,9 @@ def opts_pkg():
     This is primarily used to create the options used for master side
     state compiling routines
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.opts_pkg
     '''
@@ -318,31 +393,57 @@ def opts_pkg():
     return ret
 
 
-def tty(device, echo=None):
+def rand_str(size=9999999999):
     '''
-    Echo a string to a specific tty
+    Return a random string
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' test.rand_str
+    '''
+    hasher = getattr(hashlib, __opts__.get('hash_type', 'md5'))
+    return hasher(str(random.randint(0, size))).hexdigest()
+
+
+def exception(message='Test Exception'):
+    '''
+    Raise an exception
+
+    Optionally provide an error message or output the full stack.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' test.exception 'Oh noes!'
+    '''
+    raise Exception(message)
+
+
+def stack():
+    '''
+    Return the current stack trace
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' test.stack
+    '''
+    return ''.join(traceback.format_stack())
+
+
+def tty(*args, **kwargs):  # pylint: disable=W0613
+    '''
+    Deprecated! Moved to cmdmod.
+
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' test.tty tty0 'This is a test'
         salt '*' test.tty pts3 'This is a test'
     '''
-    if device.startswith('tty'):
-        teletype = '/dev/{0}'.format(device)
-    elif device.startswith('pts'):
-        teletype = '/dev/{0}'.format(device.replace('pts', 'pts/'))
-    else:
-        return {'Error': 'The specified device is not a valid TTY'}
-
-    cmd = 'echo {0} > {1}'.format(echo, teletype)
-    ret = __salt__['cmd.run_all'](cmd)
-    if ret['retcode'] == 0:
-        return {
-            'Success': 'Message was successfully echoed to {0}'.format(teletype)
-        }
-    else:
-        return {
-            'Error': 'Echoing to {0} returned error code {1}'.format(
-                teletype,
-                ret['retcode'])
-        }
+    return 'ERROR: This function has been moved to cmd.tty'

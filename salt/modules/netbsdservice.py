@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 The service module for NetBSD
 '''
@@ -10,13 +11,16 @@ __func_alias__ = {
     'reload_': 'reload'
 }
 
+# Define the module's virtual name
+__virtualname__ = 'service'
+
 
 def __virtual__():
     '''
     Only work on NetBSD
     '''
     if __grains__['os'] == 'NetBSD' and os.path.exists('/etc/rc.subr'):
-        return 'service'
+        return __virtualname__
     return False
 
 
@@ -48,7 +52,7 @@ def stop(name):
     return not __salt__['cmd.retcode'](cmd)
 
 
-def restart(name, **kwargs):
+def restart(name):
     '''
     Restart the named service
 
@@ -62,7 +66,7 @@ def restart(name, **kwargs):
     return not __salt__['cmd.retcode'](cmd)
 
 
-def reload_(name, **kwargs):
+def reload_(name):
     '''
     Reload the named service
 
@@ -165,6 +169,35 @@ def get_disabled():
         salt '*' service.get_disabled
     '''
     return _get_svc_list('NO')
+
+
+def available(name):
+    '''
+    Returns ``True`` if the specified service is available, otherwise returns
+    ``False``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.available sshd
+    '''
+    return name in get_all()
+
+
+def missing(name):
+    '''
+    The inverse of service.available.
+    Returns ``True`` if the specified service is not available, otherwise returns
+    ``False``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.missing sshd
+    '''
+    return name not in get_all()
 
 
 def get_all():

@@ -10,6 +10,13 @@
 # resolved, then the minion will fail to start.
 #master: salt
 
+# If multiple masters are specified in the 'master' setting, the default behavior
+# is to always try to connect to them in the order they are listed. If random_master is
+# set to True, the order will be randomized instead. This can be helpful in distributing
+# the load of many minions executing salt-call requests, for example from a cron job.
+# If only one master is listed, this setting is ignored and a warning will be logged.
+#random_master: False
+
 # Set whether the minion should connect to the master via IPv6
 #ipv6: False
 
@@ -80,6 +87,10 @@
 # to False
 #color: True
 
+# Do not strip off the colored output from nested results and states outputs
+# (true by default)
+# strip_colors: false
+
 # Backup files that are replaced by file.managed and file.recurse under
 # 'cachedir'/file_backups relative to their original location and appended
 # with a timestamp. The only valid setting is "minion". Disabled by default.
@@ -103,6 +114,10 @@
 # set to zero, the time between reconnection attempts will stay constant.
 #acceptance_wait_time_max: 0
 
+# If the master rejects the minion's public key, retry instead exiting. Rejected keys
+# # will be handled the same as waiting on acceptance.
+#rejected_retry: False
+
 # When the master key changes, the minion will try to re-auth itself to receive
 # the new master key. In larger environments this can cause a SYN flood on the
 # master because all minions try to re-auth immediately. To prevent this and
@@ -111,19 +126,36 @@
 # 0 and the defined value.
 #random_reauth_delay: 60
 
+# When waiting for a master to accept the minion's public key, salt will
+# continuously attempt to reconnect until successful. This is the timeout value,
+# in seconds, for each individual attempt. After this timeout expires, the minion
+# will wait for acceptance_wait_time seconds before trying again.
+# Unless your master is under unusually heavy load, this should be left at the default.
+#auth_timeout: 60
 
-# If you dont have any problems with syn-floods, dont bother with the
+# Number of consecutive SaltReqTimeoutError that are acceptable when trying to authenticate.
+#auth_tries: 7
+
+# If authentication fails due to SaltReqTimeoutError during a ping_interval,
+# cause sub minion process to restart.
+#auth_safemode: False
+
+# Ping Master to ensure connection is alive (minutes).
+# TODO: perhaps could update the scheduler to raise Exception in main thread after /mine_interval (60 minutes)/ fails
+#ping_interval: 90
+
+# If you don't have any problems with syn-floods, don't bother with the
 # three recon_* settings described below, just leave the defaults!
 #
 # The ZeroMQ pull-socket that binds to the masters publishing interface tries
 # to reconnect immediately, if the socket is disconnected (for example if
 # the master processes are restarted). In large setups this will have all
 # minions reconnect immediately which might flood the master (the ZeroMQ-default
-# is usually a 100ms delay). To prevent this, these three recon_* settings 
+# is usually a 100ms delay). To prevent this, these three recon_* settings
 # can be used.
 #
-# recon_default: the interval in milliseconds that the socket should wait before 
-#                trying to reconnect to the master (100ms = 1 second)
+# recon_default: the interval in milliseconds that the socket should wait before
+#                trying to reconnect to the master (1000ms = 1 second)
 #
 # recon_max: the maximum time a socket should wait. each interval the time to wait
 #            is calculated by doubling the previous time. if recon_max is reached,
@@ -136,28 +168,28 @@
 #            reconnect 5: value from previous interval * 2
 #            reconnect x: if value >= recon_max, it starts again with recon_default
 #
-# recon_randomize: generate a random wait time on minion start. The wait time will 
-#                  be a random value between recon_default and recon_default + 
-#                  recon_max. Having all minions reconnect with the same recon_default 
-#                  and recon_max value kind of defeats the purpose of being able to 
-#                  change these settings. If all minions have the same values and your 
-#                  setup is quite large (several thousand minions), they will still 
-#                  flood the master. The desired behaviour is to have timeframe within
-#                  all minions try to reconnect. 
+# recon_randomize: generate a random wait time on minion start. The wait time will
+#                  be a random value between recon_default and recon_default +
+#                  recon_max. Having all minions reconnect with the same recon_default
+#                  and recon_max value kind of defeats the purpose of being able to
+#                  change these settings. If all minions have the same values and your
+#                  setup is quite large (several thousand minions), they will still
+#                  flood the master. The desired behavior is to have timeframe within
+#                  all minions try to reconnect.
 
 # Example on how to use these settings:
 # The goal: have all minions reconnect within a 60 second timeframe on a disconnect
 #
 # The settings:
-# recon_default: 1000
-# recon_max: 59000
-# recon_randomize: True
+#recon_default: 1000
+#recon_max: 59000
+#recon_randomize: True
 #
 # Each minion will have a randomized reconnect value between 'recon_default'
 # and 'recon_default + recon_max', which in this example means between 1000ms
-# 60000ms (or between 1 and 60 seconds). The generated random-value will be 
-# doubled after each attempt to reconnect. Lets say the generated random 
-# value is 11 seconds (or 11000ms). 
+# 60000ms (or between 1 and 60 seconds). The generated random-value will be
+# doubled after each attempt to reconnect. Lets say the generated random
+# value is 11 seconds (or 11000ms).
 #
 # reconnect 1: wait 11 seconds
 # reconnect 2: wait 22 seconds
@@ -182,10 +214,26 @@
 # often lower this value
 #loop_interval: 60
 
-# When healing, a dns_check is run. This is to make sure that the originally
-# resolved dns has not changed. If this is something that does not happen in
-# your environment, set this value to False.
-#dns_check: True
+# The grains_refresh_every setting allows for a minion to periodically check
+# its grains to see if they have changed and, if so, to inform the master
+# of the new grains. This operation is moderately expensive, therefore
+# care should be taken not to set this value too low.
+#
+# Note: This value is expressed in __minutes__!
+#
+# A value of 10 minutes is a reasonable default.
+#
+# If the value is set to zero, this check is disabled.
+#grains_refresh_every: 1
+
+# Cache grains on the minion. Default is False.
+# grains_cache: False
+
+# Grains cache expiration, in seconds. If the cache file is older than this
+# number of seconds then the grains cache will be dumped and fully re-populated
+# with fresh data. Defaults to 5 minutes. Will have no effect if 'grains_cache'
+# is not enabled.
+# grains_cache_expiration: 300
 
 # Windows platforms lack posix IPC and must rely on slower TCP based inter-
 # process communications. Set ipc_mode to 'tcp' on such systems
@@ -194,6 +242,11 @@
 # Overwrite the default tcp ports used by the minion when in tcp mode
 #tcp_pub_port: 4510
 #tcp_pull_port: 4511
+
+# Passing very large events can cause the minion to consume large amounts of
+# memory. This value tunes the maximum size of a message allowed onto the
+# minion event bus. The value is expressed in bytes.
+#max_event_size: 1048576
 
 # The minion can include configuration from other files. To enable this,
 # pass a list of paths to this option. The paths can be either relative or
@@ -207,7 +260,7 @@
 # include: /etc/salt/extra_config
 #
 # Include config from several files and directories:
-# include:
+#include:
 #  - /etc/salt/extra_config
 #  - /etc/roles/webserver
 
@@ -226,18 +279,26 @@
 #returner_dirs: []
 #states_dirs: []
 #render_dirs: []
+#utils_dirs: []
 #
 # A module provider can be statically overwritten or extended for the minion
 # via the providers option, in this case the default module will be
 # overwritten by the specified module. In this example the pkg module will
 # be provided by the yumpkg5 module instead of the system default.
 #
-# providers:
-#   pkg: yumpkg5
+#providers:
+#  pkg: yumpkg5
 #
 # Enable Cython modules searching and loading. (Default: False)
 #cython_enable: False
 #
+#
+#
+# Specify a max size (in bytes) for modules on import
+# this feature is currently only supported on *nix OSs and requires psutil
+# modules_max_memory: -1
+
+
 
 #####    State Management Settings    #####
 ###########################################
@@ -321,14 +382,27 @@
 #     - /srv/salt/prod/services
 #     - /srv/salt/prod/states
 #
-# Default:
 #file_roots:
 #  base:
 #    - /srv/salt
 
+# By default, the Salt fileserver recurses fully into all defined environments
+# to attempt to find files. To limit this behavior so that the fileserver only
+# traverses directories with SLS files and special Salt directories like _modules,
+# enable the option below. This might be useful for installations where a file root
+# has a very large number of files and performance is negatively impacted.
+#
+# Default is False.
+#
+# fileserver_limit_traversal: False
+
 # The hash_type is the hash to use when discovering the hash of a file in
 # the local fileserver. The default is md5, but sha1, sha224, sha256, sha384
 # and sha512 are also supported.
+#
+# Warning: Prior to changing this value, the minion should be stopped and all
+# Salt caches should be cleared.
+#
 #hash_type: md5
 
 # The Salt pillar is searched for locally if file_client is set to local. If
@@ -362,6 +436,11 @@
 # output for each changed state if set to 'full', but if set to 'terse'
 # the output will be shortened to a single line.
 #state_output: full
+#
+# The state_output_diff setting changes whether or not the output from
+# successful states is returned. Useful when even the terse output of these
+# states is cluttering the logs. Set it to True to ignore them.
+#state_output_diff: False
 #
 # Fingerprint of the master public key to double verify the master is valid,
 # the master fingerprint can be found by running "salt-key -F master" on the
@@ -482,4 +561,4 @@
 ######      Windows Software settings ######
 ############################################
 # Location of the repository cache file on the master
-# win_repo_cachefile: 'salt://win/repo/winrepo.p'
+#win_repo_cachefile: 'salt://win/repo/winrepo.p'

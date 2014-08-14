@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Import python libs
 import os
 import sys
@@ -11,6 +13,7 @@ from salttesting.helpers import ensure_in_syspath
 ensure_in_syspath('../../')
 
 # Import salt libs
+import integration
 import salt.utils
 import salt.utils.find
 
@@ -19,48 +22,64 @@ class TestFind(TestCase):
 
     def test_parse_interval(self):
         self.assertRaises(ValueError, salt.utils.find._parse_interval, 'w')
+        self.assertRaises(ValueError, salt.utils.find._parse_interval, '1')
         self.assertRaises(ValueError, salt.utils.find._parse_interval, '1s1w')
         self.assertRaises(ValueError, salt.utils.find._parse_interval, '1s1s')
 
-        result, resolution = salt.utils.find._parse_interval('')
+        result, resolution, modifier = salt.utils.find._parse_interval('')
         self.assertEqual(result, 0)
         self.assertIs(resolution, None)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1')
-        self.assertEqual(result, 86400.0)
-        self.assertEqual(resolution, 86400)
-
-        result, resolution = salt.utils.find._parse_interval('1s')
+        result, resolution, modifier = salt.utils.find._parse_interval('1s')
         self.assertEqual(result, 1.0)
         self.assertEqual(resolution, 1)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1m')
+        result, resolution, modifier = salt.utils.find._parse_interval('1m')
         self.assertEqual(result, 60.0)
         self.assertEqual(resolution, 60)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1h')
+        result, resolution, modifier = salt.utils.find._parse_interval('1h')
         self.assertEqual(result, 3600.0)
         self.assertEqual(resolution, 3600)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1d')
+        result, resolution, modifier = salt.utils.find._parse_interval('1d')
         self.assertEqual(result, 86400.0)
         self.assertEqual(resolution, 86400)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1w')
+        result, resolution, modifier = salt.utils.find._parse_interval('1w')
         self.assertEqual(result, 604800.0)
         self.assertEqual(resolution, 604800)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1w3d6h')
+        result, resolution, modifier = salt.utils.find._parse_interval('1w3d6h')
         self.assertEqual(result, 885600.0)
         self.assertEqual(resolution, 3600)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1m1s')
+        result, resolution, modifier = salt.utils.find._parse_interval('1m1s')
         self.assertEqual(result, 61.0)
         self.assertEqual(resolution, 1)
+        self.assertEqual(modifier, '')
 
-        result, resolution = salt.utils.find._parse_interval('1m2s')
+        result, resolution, modifier = salt.utils.find._parse_interval('1m2s')
         self.assertEqual(result, 62.0)
         self.assertEqual(resolution, 1)
+        self.assertEqual(modifier, '')
+
+        result, resolution, modifier = salt.utils.find._parse_interval('+1d')
+        self.assertEqual(result, 86400.0)
+        self.assertEqual(resolution, 86400)
+        self.assertEqual(modifier, '+')
+
+        result, resolution, modifier = salt.utils.find._parse_interval('-1d')
+        self.assertEqual(result, 86400.0)
+        self.assertEqual(resolution, 86400)
+        self.assertEqual(modifier, '-')
 
     def test_parse_size(self):
         self.assertRaises(ValueError, salt.utils.find._parse_size, '')
@@ -126,7 +145,7 @@ class TestFind(TestCase):
             ValueError, salt.utils.find.RegexOption, 'name', '(.*}'
         )
 
-        option = salt.utils.find.RegexOption('name', '.*\.txt')
+        option = salt.utils.find.RegexOption('name', r'.*\.txt')
         self.assertIs(option.match('', '', ''), None)
         self.assertIs(option.match('', 'hello.txt', '').group(), 'hello.txt')
         self.assertIs(option.match('', 'HELLO.TXT', ''), None)
@@ -136,7 +155,7 @@ class TestFind(TestCase):
             ValueError, salt.utils.find.IregexOption, 'name', '(.*}'
         )
 
-        option = salt.utils.find.IregexOption('name', '.*\.txt')
+        option = salt.utils.find.IregexOption('name', r'.*\.txt')
         self.assertIs(option.match('', '', ''), None)
         self.assertIs(option.match('', 'hello.txt', '').group(), 'hello.txt')
         self.assertIs(option.match('', 'HELLO.TXT', '').group(), 'HELLO.TXT')
@@ -253,10 +272,10 @@ class TestFind(TestCase):
         self.assertEqual(option.requires(), salt.utils.find._REQUIRES_STAT)
 
     def test_mtime_option_match(self):
-        option = salt.utils.find.MtimeOption('mtime', '1w')
+        option = salt.utils.find.MtimeOption('mtime', '-1w')
         self.assertEqual(option.match('', '', [1] * 9), False)
 
-        option = salt.utils.find.MtimeOption('mtime', '1s')
+        option = salt.utils.find.MtimeOption('mtime', '-1s')
         self.assertEqual(option.match('', '', [10 ** 10] * 9), True)
 
 
@@ -264,7 +283,7 @@ class TestGrepOption(TestCase):
 
     def setUp(self):
         super(TestGrepOption, self).setUp()
-        self.tmpdir = tempfile.mkdtemp()
+        self.tmpdir = tempfile.mkdtemp(dir=integration.SYS_TMP_DIR)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
@@ -310,7 +329,7 @@ class TestPrintOption(TestCase):
 
     def setUp(self):
         super(TestPrintOption, self).setUp()
-        self.tmpdir = tempfile.mkdtemp()
+        self.tmpdir = tempfile.mkdtemp(dir=integration.SYS_TMP_DIR)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
@@ -415,7 +434,7 @@ class TestFinder(TestCase):
 
     def setUp(self):
         super(TestFinder, self).setUp()
-        self.tmpdir = tempfile.mkdtemp()
+        self.tmpdir = tempfile.mkdtemp(dir=integration.SYS_TMP_DIR)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
@@ -457,7 +476,7 @@ class TestFinder(TestCase):
             str(finder.criteria[0].__class__)[-13:-2], 'InameOption'
         )
 
-        finder = salt.utils.find.Finder({'regex': '.*\.txt'})
+        finder = salt.utils.find.Finder({'regex': r'.*\.txt'})
         self.assertEqual(
             str(finder.actions[0].__class__)[-13:-2], 'PrintOption'
         )
@@ -465,7 +484,7 @@ class TestFinder(TestCase):
             str(finder.criteria[0].__class__)[-13:-2], 'RegexOption'
         )
 
-        finder = salt.utils.find.Finder({'iregex': '.*\.txt'})
+        finder = salt.utils.find.Finder({'iregex': r'.*\.txt'})
         self.assertEqual(
             str(finder.actions[0].__class__)[-13:-2], 'PrintOption'
         )

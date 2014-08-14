@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Manage the information in the hosts file
 '''
@@ -37,6 +38,8 @@ def _list_hosts():
                 continue
             if line.startswith('#'):
                 continue
+            if '#' in line:
+                line = line[:line.index('#')].strip()
             comps = line.split()
             ip = comps.pop(0)
             ret.setdefault(ip, []).extend(comps)
@@ -126,8 +129,8 @@ def set_host(ip, alias):
     if not os.path.isfile(hfn):
         return False
     lines = salt.utils.fopen(hfn).readlines()
-    for ind in range(len(lines)):
-        tmpline = lines[ind].strip()
+    for ind, line in enumerate(lines):
+        tmpline = line.strip()
         if not tmpline:
             continue
         if tmpline.startswith('#'):
@@ -207,7 +210,14 @@ def add_host(ip, alias):
         return True
 
     hosts = _list_hosts()
-    hosts.setdefault(ip, []).append(alias)
+    inserted = False
+    for i, h in hosts.items():
+        for j in range(len(h)):
+            if h[j].startswith('#') and i == ip:
+                h.insert(j, alias)
+                inserted = True
+    if not inserted:
+        hosts.setdefault(ip, []).append(alias)
     _write_hosts(hosts)
     return True
 
@@ -215,10 +225,11 @@ def add_host(ip, alias):
 def _write_hosts(hosts):
     lines = []
     for ip, aliases in hosts.iteritems():
-        for alias in aliases:
-            lines.append(
-                '{0}\t\t{1}'.format(ip, alias)
+        line = '{0}\t\t{1}'.format(
+            ip,
+            '\t\t'.join(aliases)
             )
+        lines.append(line)
 
     hfn = __get_hosts_filename()
     with salt.utils.fopen(hfn, 'w+') as ofile:

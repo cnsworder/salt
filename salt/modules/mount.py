@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Salt module to manage unix mounts and the fstab file
 '''
@@ -16,17 +17,46 @@ from salt.exceptions import CommandNotFoundError, CommandExecutionError
 # Set up logger
 log = logging.getLogger(__name__)
 
+# Define the module's virtual name
+__virtualname__ = 'mount'
+
+
+def __virtual__():
+    '''
+    Only load on POSIX-like systems
+    '''
+    # Disable on Windows, a specific file module exists:
+    if salt.utils.is_windows():
+        return False
+    return True
+
+
+def _list_mounts():
+    ret = {}
+    for line in __salt__['cmd.run_stdout']('mount -l').split('\n'):
+        comps = re.sub(r"\s+", " ", line).split()
+        ret[comps[2]] = comps[0]
+    return ret
+
 
 def _active_mountinfo(ret):
+    _list = _list_mounts()
     filename = '/proc/self/mountinfo'
     if not os.access(filename, os.R_OK):
         msg = 'File not readable {0}'
         raise CommandExecutionError(msg.format(filename))
 
+    blkid_info = __salt__['disk.blkid']()
+
     with salt.utils.fopen(filename) as ifile:
         for line in ifile:
             comps = line.split()
             device = comps[2].split(':')
+            device_name = comps[8]
+            device_uuid = None
+            if device_name:
+                device_uuid = blkid_info.get(device_name, {}).get('UUID')
+                device_uuid = device_uuid and device_uuid.lower()
             ret[comps[4]] = {'mountid': comps[0],
                              'parentid': comps[1],
                              'major': device[0],
@@ -34,12 +64,18 @@ def _active_mountinfo(ret):
                              'root': comps[3],
                              'opts': comps[5].split(','),
                              'fstype': comps[7],
-                             'device': comps[8],
-                             'superopts': comps[9].split(',')}
+                             'device': device_name,
+                             'alt_device': _list.get(comps[4], None),
+                             'superopts': comps[9].split(','),
+                             'device_uuid': device_uuid}
     return ret
 
 
 def _active_mounts(ret):
+    '''
+    List active mounts on Linux systems
+    '''
+    _list = _list_mounts()
     filename = '/proc/self/mounts'
     if not os.access(filename, os.R_OK):
         msg = 'File not readable {0}'
@@ -49,17 +85,33 @@ def _active_mounts(ret):
         for line in ifile:
             comps = line.split()
             ret[comps[1]] = {'device': comps[0],
+                             'alt_device': _list.get(comps[1], None),
                              'fstype': comps[2],
                              'opts': comps[3].split(',')}
     return ret
 
 
 def _active_mounts_freebsd(ret):
+    '''
+    List active mounts on FreeBSD systems
+    '''
     for line in __salt__['cmd.run_stdout']('mount -p').split('\n'):
         comps = re.sub(r"\s+", " ", line).split()
         ret[comps[1]] = {'device': comps[0],
                          'fstype': comps[2],
                          'opts': comps[3].split(',')}
+    return ret
+
+
+def _active_mounts_solaris(ret):
+    '''
+    List active mounts on Solaris systems
+    '''
+    for line in __salt__['cmd.run_stdout']('mount -v').split('\n'):
+        comps = re.sub(r"\s+", " ", line).split()
+        ret[comps[2]] = {'device': comps[0],
+                         'fstype': comps[4],
+                         'opts': comps[5].split('/')}
     return ret
 
 
@@ -74,8 +126,10 @@ def active():
         salt '*' mount.active
     '''
     ret = {}
-    if __grains__['os'] in ('FreeBSD'):
+    if __grains__['os'] == 'FreeBSD':
         _active_mounts_freebsd(ret)
+    elif __grains__['os'] == 'Solaris':
+        _active_mounts_solaris(ret)
     else:
         try:
             _active_mountinfo(ret)
@@ -211,13 +265,16 @@ def set_fstab(
                     # Invalid entry
                     lines.append(line)
                     continue
-                if comps[1] == name:
+                if comps[0] == device:
                     # check to see if there are changes
                     # and fix them if there are any
                     present = True
                     if comps[0] != device:
                         change = True
                         comps[0] = device
+                    if comps[1] != name:
+                        change = True
+                        comps[1] = name
                     if comps[2] != fstype:
                         change = True
                         comps[2] = fstype
@@ -266,13 +323,12 @@ def set_fstab(
         else:
             if not salt.utils.test_mode(test=test, **kwargs):
                 # The entry is new, add it to the end of the fstab
-                newline = '{0}\t\t{1}\t{2}\t{3}\t{4} {5}\n'.format(
-                        device,
-                        name,
-                        fstype,
-                        opts,
-                        dump,
-                        pass_num)
+                newline = '{0}\t\t{1}\t{2}\t{3}\t{4} {5}\n'.format(device,
+                                                                   name,
+                                                                   fstype,
+                                                                   opts,
+                                                                   dump,
+                                                                   pass_num)
                 lines.append(newline)
                 try:
                     with salt.utils.fopen(config, 'w+') as ofile:
@@ -402,11 +458,10 @@ def swaps():
             if line.startswith('Filename'):
                 continue
             comps = line.split()
-            ret[comps[0]] = {
-                    'type': comps[1],
-                    'size': comps[2],
-                    'used': comps[3],
-                    'priority': comps[4]}
+            ret[comps[0]] = {'type': comps[1],
+                             'size': comps[2],
+                             'used': comps[3],
+                             'priority': comps[4]}
     return ret
 
 
@@ -456,3 +511,22 @@ def swapoff(name):
             return False
         return True
     return None
+
+
+def is_mounted(name):
+    '''
+    .. versionadded:: 2014.7.0
+
+    Provide information if the path is mounted
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' mount.is_mounted /mnt/share
+    '''
+    active_ = active()
+    if name in active_:
+        return True
+    else:
+        return False

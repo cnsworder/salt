@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Return config information
 '''
@@ -5,10 +6,14 @@ Return config information
 # Import python libs
 import re
 import os
-import urllib
 
 # Import salt libs
 import salt.utils
+import salt._compat
+import salt.syspaths as syspaths
+import salt.utils.sdb as sdb
+
+__proxyenabled__ = ['*']
 
 # Set up the default values for all systems
 DEFAULTS = {'mongo.db': 'salt',
@@ -34,16 +39,19 @@ DEFAULTS = {'mongo.db': 'salt',
             'solr.num_backups': 1,
             'poudriere.config': '/usr/local/etc/poudriere.conf',
             'poudriere.config_dir': '/usr/local/etc/poudriere.d',
+            'ldap.uri': '',
             'ldap.server': 'localhost',
             'ldap.port': '389',
             'ldap.tls': False,
+            'ldap.no_verify': False,
+            'ldap.anonymous': True,
             'ldap.scope': 2,
             'ldap.attrs': None,
             'ldap.binddn': '',
             'ldap.bindpw': '',
             'hosts.file': '/etc/hosts',
             'aliases.file': '/etc/aliases',
-            'virt.images': '/srv/salt-images',
+            'virt.images': os.path.join(syspaths.SRV_ROOT_DIR, 'salt-images'),
             'virt.tunnel': False,
             }
 
@@ -75,7 +83,15 @@ def manage_mode(mode):
     '''
     if mode is None:
         return None
-    return str(mode).lstrip('0').zfill(3)
+    if not isinstance(mode, salt._compat.string_types):
+        # Make it a string in case it's not
+        mode = str(mode)
+    # Strip any quotes and initial 0, though zero-pad it up to 4
+    ret = mode.strip('"').strip('\'').lstrip('0').zfill(4)
+    if ret[0] != '0':
+        # Always include a leading zero
+        return '0{0}'.format(ret)
+    return ret
 
 
 def valid_fileproto(uri):
@@ -180,9 +196,9 @@ def merge(value,
 
 def get(key, default=''):
     '''
-    .. versionadded: 0.14
+    .. versionadded: 0.14.0
 
-    Attempt to retrieve the named value from opts, pillar, grains of the master
+    Attempt to retrieve the named value from opts, pillar, grains or the master
     config, if the named value is not available return the passed default.
     The default return is an empty string.
 
@@ -209,18 +225,22 @@ def get(key, default=''):
 
         salt '*' config.get pkg:apache
     '''
-    ret = salt.utils.traverse_dict(__opts__, key, '_|-')
+    ret = salt.utils.traverse_dict_and_list(__opts__, key, '_|-')
     if ret != '_|-':
-        return ret
-    ret = salt.utils.traverse_dict(__grains__, key, '_|-')
+        return sdb.sdb_get(ret, __opts__)
+
+    ret = salt.utils.traverse_dict_and_list(__grains__, key, '_|-')
     if ret != '_|-':
-        return ret
-    ret = salt.utils.traverse_dict(__pillar__, key, '_|-')
+        return sdb.sdb_get(ret, __opts__)
+
+    ret = salt.utils.traverse_dict_and_list(__pillar__, key, '_|-')
     if ret != '_|-':
-        return ret
-    ret = salt.utils.traverse_dict(__pillar__.get('master', {}), key, '_|-')
+        return sdb.sdb_get(ret, __opts__)
+
+    ret = salt.utils.traverse_dict_and_list(__pillar__.get('master', {}), key, '_|-')
     if ret != '_|-':
-        return ret
+        return sdb.sdb_get(ret, __opts__)
+
     return default
 
 
@@ -243,22 +263,3 @@ def dot_vals(value):
         if key.startswith('{0}.'.format(value)):
             ret[key] = val
     return ret
-
-
-def gather_bootstrap_script(replace=False):
-    '''
-    Download the salt-bootstrap script, set replace to True to refresh the
-    script if it has already been downloaded
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' qemu.gather_bootstrap_script True
-    '''
-    fn_ = os.path.join(__opts__['cachedir'], 'bootstrap.sh')
-    if not replace and os.path.isfile(fn_):
-        return fn_
-    with salt.utils.fopen(fn_, 'w+') as fp_:
-        fp_.write(urllib.urlopen('http://bootstrap.saltstack.org').read())
-    return fn_

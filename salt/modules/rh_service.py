@@ -1,7 +1,6 @@
+# -*- coding: utf-8 -*-
 '''
-Service support for RHEL-based systems. This interface uses the service and
-chkconfig commands, and for upstart support uses helper functions from the
-upstart module, as well as the ``start``, ``stop``, and ``status`` commands.
+Service support for RHEL-based systems, including support for both upstart and sysvinit
 '''
 
 # Import python libs
@@ -18,6 +17,9 @@ log = logging.getLogger(__name__)
 __func_alias__ = {
     'reload_': 'reload'
 }
+
+# Define the module's virtual name
+__virtualname__ = 'service'
 
 # Import upstart module if needed
 HAS_UPSTART = False
@@ -36,25 +38,40 @@ if salt.utils.which('initctl'):
 
 def __virtual__():
     '''
-    Only work on systems which default to systemd
+    Only work on select distros which still use Red Hat's /usr/bin/service for
+    management of either sysvinit or a hybrid sysvinit/upstart init system.
     '''
     # Enable on these platforms only.
     enable = set((
         'RedHat',
         'CentOS',
-        'Scientific',
+        'ScientificLinux',
         'CloudLinux',
         'Amazon',
         'Fedora',
         'ALT',
         'OEL',
-        'SUSE  Enterprise Server'
+        'SUSE  Enterprise Server',
+        'SUSE',
+        'McAfee  OS Server'
     ))
     if __grains__['os'] in enable:
-        if __grains__['os'] == 'Fedora':
-            if __grains__.get('osrelease', 0) > 15:
+        if __grains__['os'] == 'SUSE':
+            if __grains__['osrelease'].startswith('11'):
+                return __virtualname__
+            else:
                 return False
-        return 'service'
+        try:
+            osrelease = float(__grains__.get('osrelease', 0))
+        except ValueError:
+            return False
+        if __grains__['os'] == 'Fedora':
+            if osrelease > 15:
+                return False
+        if __grains__['os'] in ('RedHat', 'CentOS', 'ScientificLinux'):
+            if osrelease >= 7:
+                return False
+        return __virtualname__
     return False
 
 
@@ -113,7 +130,7 @@ def _service_is_chkconfig(name):
     Return True if the service is managed by chkconfig.
     '''
     cmdline = '/sbin/chkconfig --list {0}'.format(name)
-    return (__salt__['cmd.retcode'](cmdline) == 0)
+    return __salt__['cmd.retcode'](cmdline, ignore_retcode=True) == 0
 
 
 def _sysv_is_enabled(name, runlevel=None):
@@ -205,7 +222,9 @@ def get_enabled(limit=''):
     Return the enabled services. Use the ``limit`` param to restrict results
     to services of that type.
 
-    CLI Examples::
+    CLI Examples:
+
+    .. code-block:: bash
 
         salt '*' service.get_enabled
         salt '*' service.get_enabled limit=upstart
@@ -233,7 +252,9 @@ def get_disabled(limit=''):
     Return the disabled services. Use the ``limit`` param to restrict results
     to services of that type.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.get_disabled
         salt '*' service.get_disabled limit=upstart
@@ -261,7 +282,9 @@ def get_all(limit=''):
     Return all installed services. Use the ``limit`` param to restrict results
     to services of that type.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.get_all
         salt '*' service.get_all limit=upstart
@@ -278,28 +301,57 @@ def get_all(limit=''):
 
 def available(name, limit=''):
     '''
-    Return True is the named service is available.  Use the ``limit`` param to
+    Return True if the named service is available.  Use the ``limit`` param to
     restrict results to services of that type.
 
-    CLI Examples::
+    CLI Examples:
 
-        salt '*' service.get_enabled
-        salt '*' service.get_enabled limit=upstart
-        salt '*' service.get_enabled limit=sysvinit
+    .. code-block:: bash
+
+        salt '*' service.available sshd
+        salt '*' service.available sshd limit=upstart
+        salt '*' service.available sshd limit=sysvinit
     '''
     if limit == 'upstart':
         return _service_is_upstart(name)
     elif limit == 'sysvinit':
         return _service_is_sysv(name)
     else:
-        return _service_is_upstart(name) or _service_is_sysv(name)
+        return _service_is_upstart(name) or _service_is_sysv(name) or _service_is_chkconfig(name)
+
+
+def missing(name, limit=''):
+    '''
+    The inverse of service.available.
+    Return True if the named service is not available.  Use the ``limit`` param to
+    restrict results to services of that type.
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' service.missing sshd
+        salt '*' service.missing sshd limit=upstart
+        salt '*' service.missing sshd limit=sysvinit
+    '''
+    if limit == 'upstart':
+        return not _service_is_upstart(name)
+    elif limit == 'sysvinit':
+        return not _service_is_sysv(name)
+    else:
+        if _service_is_upstart(name) or _service_is_sysv(name):
+            return False
+        else:
+            return True
 
 
 def start(name):
     '''
     Start the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.start <service name>
     '''
@@ -314,7 +366,9 @@ def stop(name):
     '''
     Stop the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.stop <service name>
     '''
@@ -325,11 +379,13 @@ def stop(name):
     return not __salt__['cmd.retcode'](cmd)
 
 
-def restart(name, **kwargs):
+def restart(name):
     '''
     Restart the named service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.restart <service name>
     '''
@@ -340,11 +396,13 @@ def restart(name, **kwargs):
     return not __salt__['cmd.retcode'](cmd)
 
 
-def reload_(name, **kwargs):
+def reload_(name):
     '''
     Reload the named service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.reload <service name>
     '''
@@ -360,7 +418,9 @@ def status(name, sig=None):
     Return the status for a service, returns a bool whether the service is
     running.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.status <service name>
     '''
@@ -370,14 +430,16 @@ def status(name, sig=None):
     if sig:
         return bool(__salt__['status.pid'](sig))
     cmd = '/sbin/service {0} status'.format(name)
-    return __salt__['cmd.retcode'](cmd) == 0
+    return __salt__['cmd.retcode'](cmd, ignore_retcode=True) == 0
 
 
 def enable(name, **kwargs):
     '''
     Enable the named service to start at boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.enable <service name>
     '''
@@ -391,7 +453,9 @@ def disable(name, **kwargs):
     '''
     Disable the named service to start at boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.disable <service name>
     '''
@@ -405,7 +469,9 @@ def enabled(name):
     '''
     Check to see if the named service is enabled to start on boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.enabled <service name>
     '''
@@ -419,7 +485,9 @@ def disabled(name):
     '''
     Check to see if the named service is disabled to start on boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.disabled <service name>
     '''

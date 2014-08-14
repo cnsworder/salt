@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+
+from __future__ import print_function
 import yaml
 import subprocess
 import hashlib
@@ -50,13 +53,13 @@ def run(command):
     '''
     Execute a single command and check the returns
     '''
-    cmd = 'salt \* {0} --yaml-out -t 500 > high'.format(command)
+    cmd = r'salt \* {0} --yaml-out -t 500 > high'.format(command)
     subprocess.call(cmd, shell=True)
     data = yaml.load(open('high'))
     hashes = set()
     for key, val in data.items():
         has = hashlib.md5(str(val)).hexdigest()
-        if not has in hashes:
+        if has not in hashes:
             print('{0}:'.format(has))
             pprint.pprint(val)
         hashes.add(has)
@@ -70,7 +73,7 @@ def run(command):
 
 if __name__ == '__main__':
     opts = parse()
-    for ind in range(opts['runs']):
+    for _ in opts['runs']:
         for command in opts['command'].split(','):
             print('-' * 30)
             print('Running command {0}'.format(command))

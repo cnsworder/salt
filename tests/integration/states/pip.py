@@ -1,32 +1,35 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     tests.integration.states.pip
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2012-2013 by the SaltStack Team, see AUTHORS for more details
-    :license: Apache 2.0, see LICENSE for more details.
 '''
 
 # Import python libs
 import os
+import pwd
+import glob
 import shutil
 
 # Import Salt Testing libs
-from salttesting.helpers import ensure_in_syspath
+from salttesting import skipIf
+from salttesting.helpers import (
+    destructiveTest,
+    ensure_in_syspath,
+    with_system_user
+)
 ensure_in_syspath('../../')
 
 # Import salt libs
 import integration
+import salt.utils
+from salt.modules.virtualenv_mod import KNOWN_BINARY_NAMES
 
 
+@skipIf(salt.utils.which_bin(KNOWN_BINARY_NAMES) is None, 'virtualenv not installed')
 class PipStateTest(integration.ModuleCase, integration.SaltReturnAssertsMixIn):
-
-    def setUp(self):
-        super(PipStateTest, self).setUp()
-        ret = self.run_function('cmd.has_exec', ['virtualenv'])
-        if not ret:
-            self.skipTest('virtualenv not installed')
 
     def test_pip_installed_errors(self):
         venv_dir = os.path.join(
@@ -145,8 +148,8 @@ class PipStateTest(integration.ModuleCase, integration.SaltReturnAssertsMixIn):
             ret = self.run_function('state.sls', mods='issue-2087-missing-pip')
             self.assertSaltFalseReturn(ret)
             self.assertInSaltComment(
-                ret,
-                'Error installing \'pep8\': Could not find a `pip` binary'
+                'Error installing \'pep8\': Could not find a `pip` binary',
+                ret
             )
         finally:
             if os.path.isdir(venv_dir):
@@ -169,6 +172,263 @@ class PipStateTest(integration.ModuleCase, integration.SaltReturnAssertsMixIn):
         finally:
             if os.path.isdir(venv_dir):
                 shutil.rmtree(venv_dir)
+
+    @destructiveTest
+    @skipIf(os.geteuid() != 0, 'you must be root to run this test')
+    @with_system_user('issue-6912', on_existing='delete', delete=True)
+    def test_issue_6912_wrong_owner(self, username):
+        venv_dir = os.path.join(
+            integration.SYS_TMP_DIR, '6912-wrong-owner'
+        )
+        # ----- Using runas ------------------------------------------------->
+        venv_create = self.run_function(
+            'virtualenv.create', [venv_dir], runas=username
+        )
+        if venv_create['retcode'] > 0:
+            self.skipTest(
+                'Failed to create testcase virtual environment: {0}'.format(
+                    venv_create
+                )
+            )
+
+        # Using the package name.
+        try:
+            ret = self.run_state(
+                'pip.installed', name='pep8', runas=username, bin_env=venv_dir
+            )
+            self.assertSaltTrueReturn(ret)
+            uinfo = pwd.getpwnam(username)
+            for globmatch in (os.path.join(venv_dir, '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '*', '**', 'pep8*')):
+                for path in glob.glob(globmatch):
+                    self.assertEqual(
+                        uinfo.pw_uid, os.stat(path).st_uid
+                    )
+
+        finally:
+            if os.path.isdir(venv_dir):
+                shutil.rmtree(venv_dir)
+
+        # Using a requirements file
+        venv_create = self.run_function(
+            'virtualenv.create', [venv_dir], runas=username
+        )
+        if venv_create['retcode'] > 0:
+            self.skipTest(
+                'Failed to create testcase virtual environment: {0}'.format(
+                    ret
+                )
+            )
+        req_filename = os.path.join(
+            integration.TMP_STATE_TREE, 'issue-6912-requirements.txt'
+        )
+        with salt.utils.fopen(req_filename, 'wb') as reqf:
+            reqf.write('pep8')
+
+        try:
+            ret = self.run_state(
+                'pip.installed', name='', runas=username, bin_env=venv_dir,
+                requirements='salt://issue-6912-requirements.txt'
+            )
+            self.assertSaltTrueReturn(ret)
+            uinfo = pwd.getpwnam(username)
+            for globmatch in (os.path.join(venv_dir, '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '*', '**', 'pep8*')):
+                for path in glob.glob(globmatch):
+                    self.assertEqual(
+                        uinfo.pw_uid, os.stat(path).st_uid
+                    )
+
+        finally:
+            if os.path.isdir(venv_dir):
+                shutil.rmtree(venv_dir)
+            os.unlink(req_filename)
+        # <---- Using runas --------------------------------------------------
+
+        # ----- Using user -------------------------------------------------->
+        venv_create = self.run_function(
+            'virtualenv.create', [venv_dir], runas=username
+        )
+        if venv_create['retcode'] > 0:
+            self.skipTest(
+                'Failed to create testcase virtual environment: {0}'.format(
+                    ret
+                )
+            )
+
+        # Using the package name
+        try:
+            ret = self.run_state(
+                'pip.installed', name='pep8', user=username, bin_env=venv_dir
+            )
+            self.assertSaltTrueReturn(ret)
+            uinfo = pwd.getpwnam(username)
+            for globmatch in (os.path.join(venv_dir, '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '*', '**', 'pep8*')):
+                for path in glob.glob(globmatch):
+                    self.assertEqual(
+                        uinfo.pw_uid, os.stat(path).st_uid
+                    )
+
+        finally:
+            if os.path.isdir(venv_dir):
+                shutil.rmtree(venv_dir)
+
+        # Using a requirements file
+        venv_create = self.run_function(
+            'virtualenv.create', [venv_dir], runas=username
+        )
+        if venv_create['retcode'] > 0:
+            self.skipTest(
+                'Failed to create testcase virtual environment: {0}'.format(
+                    ret
+                )
+            )
+        req_filename = os.path.join(
+            integration.TMP_STATE_TREE, 'issue-6912-requirements.txt'
+        )
+        with salt.utils.fopen(req_filename, 'wb') as reqf:
+            reqf.write('pep8')
+
+        try:
+            ret = self.run_state(
+                'pip.installed', name='', user=username, bin_env=venv_dir,
+                requirements='salt://issue-6912-requirements.txt'
+            )
+            self.assertSaltTrueReturn(ret)
+            uinfo = pwd.getpwnam(username)
+            for globmatch in (os.path.join(venv_dir, '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '**', 'pep8*'),
+                              os.path.join(venv_dir, '*', '*', '**', 'pep8*')):
+                for path in glob.glob(globmatch):
+                    self.assertEqual(
+                        uinfo.pw_uid, os.stat(path).st_uid
+                    )
+
+        finally:
+            if os.path.isdir(venv_dir):
+                shutil.rmtree(venv_dir)
+            os.unlink(req_filename)
+        # <---- Using user ---------------------------------------------------
+
+    def test_issue_6833_pip_upgrade_pip(self):
+        # Create the testing virtualenv
+        venv_dir = os.path.join(
+            integration.TMP, '6833-pip-upgrade-pip'
+        )
+        ret = self.run_function('virtualenv.create', [venv_dir])
+        try:
+            try:
+                self.assertEqual(ret['retcode'], 0)
+                self.assertIn(
+                    'New python executable',
+                    ret['stdout']
+                )
+            except AssertionError:
+                import pprint
+                pprint.pprint(ret)
+                raise
+
+            # Let's install a fixed version pip over whatever pip was
+            # previously installed
+            ret = self.run_function(
+                'pip.install', ['pip==1.3.1'], upgrade=True,
+                ignore_installed=True,
+                bin_env=venv_dir
+            )
+            try:
+                self.assertEqual(ret['retcode'], 0)
+                self.assertIn(
+                    'Successfully installed pip',
+                    ret['stdout']
+                )
+            except AssertionError:
+                import pprint
+                pprint.pprint(ret)
+                raise
+
+            # Le't make sure we have pip 1.3.1 installed
+            self.assertEqual(
+                self.run_function('pip.list', ['pip'], bin_env=venv_dir),
+                {'pip': '1.3.1'}
+            )
+
+            # Now the actual pip upgrade pip test
+            ret = self.run_state(
+                'pip.installed', name='pip==1.4.1', upgrade=True,
+                bin_env=venv_dir
+            )
+            try:
+                self.assertSaltTrueReturn(ret)
+                self.assertInSaltReturn(
+                    'Installed',
+                    ret,
+                    ['changes', 'pip==1.4.1']
+                )
+            except AssertionError:
+                import pprint
+                pprint.pprint(ret)
+                raise
+        finally:
+            if os.path.isdir(venv_dir):
+                shutil.rmtree(venv_dir)
+
+    def test_pip_installed_specific_env(self):
+        # Create the testing virtualenv
+        venv_dir = os.path.join(
+            integration.TMP, 'pip-installed-specific-env'
+        )
+
+        # Let's write a requirements file
+        requirements_file = os.path.join(
+            integration.TMP_PRODENV_STATE_TREE, 'prod-env-requirements.txt'
+        )
+        with salt.utils.fopen(requirements_file, 'wb') as reqf:
+            reqf.write('pep8\n')
+
+        try:
+            ret = self.run_function('virtualenv.create', [venv_dir])
+
+            # The requirements file should not be found the base environment
+            ret = self.run_state(
+                'pip.installed', name='', bin_env=venv_dir,
+                requirements='salt://prod-env-requirements.txt'
+            )
+            self.assertSaltFalseReturn(ret)
+            self.assertInSaltComment(
+                "'salt://prod-env-requirements.txt' not found", ret
+            )
+
+            # The requirements file must be found in the prod environment
+            ret = self.run_state(
+                'pip.installed', name='', bin_env=venv_dir, saltenv='prod',
+                requirements='salt://prod-env-requirements.txt'
+            )
+            self.assertSaltTrueReturn(ret)
+            self.assertInSaltComment(
+                'Successfully processed requirements file '
+                'salt://prod-env-requirements.txt', ret
+            )
+
+            # We're using the base environment but we're passing the prod
+            # environment as an url arg to salt://
+            ret = self.run_state(
+                'pip.installed', name='', bin_env=venv_dir,
+                requirements='salt://prod-env-requirements.txt?saltenv=prod'
+            )
+            self.assertSaltTrueReturn(ret)
+            self.assertInSaltComment(
+                'Successfully processed requirements file '
+                'salt://prod-env-requirements.txt', ret
+            )
+        finally:
+            if os.path.isdir(venv_dir):
+                shutil.rmtree(venv_dir)
+            if os.path.isfile(requirements_file):
+                os.unlink(requirements_file)
 
 
 if __name__ == '__main__':

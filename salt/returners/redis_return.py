@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Return data to a redis server
 
@@ -5,9 +6,15 @@ To enable this returner the minion will need the python client for redis
 installed and the following values configured in the minion or master
 config, these are the defaults:
 
+.. code-block:: yaml
+
     redis.db: '0'
     redis.host: 'salt'
     redis.port: 6379
+
+  To use the redis returner, append '--return redis' to the salt command. ex:
+
+    salt '*' test.ping --return redis
 '''
 
 # Import python libs
@@ -20,11 +27,14 @@ try:
 except ImportError:
     HAS_REDIS = False
 
+# Define the module's virtual name
+__virtualname__ = 'redis'
+
 
 def __virtual__():
     if not HAS_REDIS:
         return False
-    return 'redis'
+    return __virtualname__
 
 
 def _get_serv():
@@ -104,7 +114,7 @@ def get_jids():
     Return a list of all job ids
     '''
     serv = _get_serv()
-    return serv.smembers('jids')
+    return list(serv.smembers('jids'))
 
 
 def get_minions():
@@ -112,4 +122,4 @@ def get_minions():
     Return a list of minions
     '''
     serv = _get_serv()
-    return serv.smembers('minions')
+    return list(serv.smembers('minions'))

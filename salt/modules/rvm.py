@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Manage ruby installations and gemsets with RVM, the Ruby Version Manager.
 '''
@@ -26,7 +27,7 @@ def _get_rvm_location(runas=None):
     return '/usr/local/rvm/bin/rvm'
 
 
-def _rvm(command, arguments=None, runas=None):
+def _rvm(command, arguments=None, runas=None, cwd=None):
     if runas is None:
         runas = __salt__['config.option']('rvm.runas')
     if not is_installed(runas):
@@ -36,24 +37,26 @@ def _rvm(command, arguments=None, runas=None):
     if arguments:
         cmd.append(arguments)
 
-    ret = __salt__['cmd.run_all'](' '.join(cmd), runas=runas)
+    ret = __salt__['cmd.run_all'](' '.join(cmd), runas=runas, cwd=cwd)
 
     if ret['retcode'] == 0:
         return ret['stdout']
     return False
 
 
-def _rvm_do(ruby, command, runas=None):
+def _rvm_do(ruby, command, runas=None, cwd=None):
     return _rvm('{ruby} do {command}'.
                 format(ruby=ruby or 'default', command=command),
-                runas=runas)
+                runas=runas, cwd=cwd)
 
 
 def is_installed(runas=None):
     '''
     Check if RVM is installed.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.is_installed
     '''
@@ -64,17 +67,19 @@ def install(runas=None):
     '''
     Install RVM system wide.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.install
     '''
     # RVM dependencies on Ubuntu 10.04:
     #   bash coreutils gzip bzip2 gawk sed curl git-core subversion
-    installer = 'https://raw.github.com/wayneeseguin/rvm/master/binscripts/rvm-installer'
+    installer = 'https://raw.githubusercontent.com/wayneeseguin/rvm/master/binscripts/rvm-installer'
     ret = __salt__['cmd.run_all'](
         # the RVM installer automatically does a multi-user install when it is
         # invoked with root privileges
-        'curl -s {installer} | bash -s stable'.format(installer=installer),
+        'curl -Ls {installer} | bash -s stable'.format(installer=installer),
         runas=runas
     )
     if ret['retcode'] > 0:
@@ -95,7 +100,9 @@ def install_ruby(ruby, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.install_ruby 1.9.3-p385
     '''
@@ -104,7 +111,11 @@ def install_ruby(ruby, runas=None):
     #   git-core zlib1g zlib1g-dev libssl-dev libyaml-dev libsqlite3-0
     #   libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev autoconf libc6-dev
     #   libncurses5-dev automake libtool bison subversion ruby
-    return _rvm('install', ruby, runas=runas)
+    if runas and runas != 'root':
+        _rvm('autolibs disable', ruby, runas=runas)
+        return _rvm('install --disable-binary', ruby, runas=runas)
+    else:
+        return _rvm('install', ruby, runas=runas)
 
 
 def reinstall_ruby(ruby, runas=None):
@@ -116,7 +127,9 @@ def reinstall_ruby(ruby, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.reinstall_ruby 1.9.3-p385
     '''
@@ -130,7 +143,9 @@ def list_(runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.list
     '''
@@ -156,7 +171,9 @@ def set_default(ruby, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.set_default 2.0.0
     '''
@@ -173,7 +190,9 @@ def get(version='stable', runas=None):
     ruby
         The version of ruby to reinstall.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.get
     '''
@@ -195,7 +214,9 @@ def wrapper(ruby_string, wrapper_prefix, runas=None, *binaries):
         given, wrappers for ruby, gem, rake, irb, rdoc, ri and testrb are
         generated.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.wrapper <ruby_string> <wrapper_prefix>
     '''
@@ -220,7 +241,9 @@ def rubygems(ruby, version, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.rubygems 2.0.0 1.8.24
     '''
@@ -238,7 +261,9 @@ def gemset_create(ruby, gemset, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.gemset_create 2.0.0 foobar
     '''
@@ -256,7 +281,9 @@ def gemset_list(ruby='default', runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.gemset_list
     '''
@@ -282,7 +309,9 @@ def gemset_delete(ruby, gemset, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.gemset_delete 2.0.0 foobar
     '''
@@ -302,7 +331,9 @@ def gemset_empty(ruby, gemset, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.gemset_empty 2.0.0 foobar
     '''
@@ -322,7 +353,9 @@ def gemset_copy(source, destination, runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.gemset_copy foobar bazquo
     '''
@@ -338,7 +371,9 @@ def gemset_list_all(runas=None):
     runas : None
         The user to run rvm as.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.gemset_list_all
     '''
@@ -359,7 +394,7 @@ def gemset_list_all(runas=None):
     return gemsets
 
 
-def do(ruby, command, runas=None):  # pylint: disable=C0103
+def do(ruby, command, runas=None, cwd=None):  # pylint: disable=C0103
     '''
     Execute a command in an RVM controlled environment.
 
@@ -369,9 +404,13 @@ def do(ruby, command, runas=None):  # pylint: disable=C0103
         The command to execute.
     runas : None
         The user to run rvm as.
+    cwd : None
+        The current working directory.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rvm.do 2.0.0 <command>
     '''
-    return _rvm_do(ruby, command, runas=runas)
+    return _rvm_do(ruby, command, runas=runas, cwd=cwd)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 A flexible renderer that takes a templating engine and a data format
 
@@ -36,6 +37,7 @@ from cStringIO import StringIO
 # Import salt libs
 import salt.utils
 from salt.exceptions import SaltRenderError
+from salt._compat import string_types
 
 __all__ = ['render']
 
@@ -44,7 +46,7 @@ log = logging.getLogger(__name__)
 
 __opts__ = {
     'stateconf_end_marker': r'#\s*-+\s*end of state config\s*-+',
-    # eg, something like "# --- end of state config --" works by default.
+    # e.g., something like "# --- end of state config --" works by default.
 
     'stateconf_start_state': '.start',
     # name of the state id for the generated start state.
@@ -97,7 +99,7 @@ Options(for this renderer):
 )
 
 
-def render(input, env='', sls='', argline='', **kws):
+def render(input, saltenv='base', sls='', argline='', **kws):
     gen_start_state = False
     no_goal_state = False
     implicit_require = False
@@ -110,10 +112,10 @@ def render(input, env='', sls='', argline='', **kws):
             ctx.update(context)
 
         tmplout = render_template(
-                StringIO(data), env, sls, context=ctx,
+                StringIO(data), saltenv, sls, context=ctx,
                 argline=rt_argline.strip(), **kws
         )
-        high = render_data(tmplout, env, sls, argline=rd_argline.strip())
+        high = render_data(tmplout, saltenv, sls, argline=rd_argline.strip())
         return process_high_data(high, extract)
 
     def process_high_data(high, extract):
@@ -123,7 +125,7 @@ def render(input, env='', sls='', argline='', **kws):
         data = copy.deepcopy(high)
         try:
             rewrite_single_shorthand_state_decl(data)
-            rewrite_sls_includes_excludes(data, sls, env)
+            rewrite_sls_includes_excludes(data, sls, saltenv)
 
             if not extract and implicit_require:
                 sid = has_names_decls(data)
@@ -184,7 +186,7 @@ def render(input, env='', sls='', argline='', **kws):
         ]
         try:
             name, rd_argline = (args[0] + ' ').split(' ', 1)
-            render_data = renderers[name]  # eg, the yaml renderer
+            render_data = renderers[name]  # e.g., the yaml renderer
             if implicit_require:
                 if name == 'yaml':
                     rd_argline = '-o ' + rd_argline
@@ -194,13 +196,13 @@ def render(input, env='', sls='', argline='', **kws):
                         'is used!'
                     )
             name, rt_argline = (args[1] + ' ').split(' ', 1)
-            render_template = renderers[name]  # eg, the mako renderer
+            render_template = renderers[name]  # e.g., the mako renderer
         except KeyError as err:
             raise SaltRenderError('Renderer: {0} is not available!'.format(err))
         except IndexError:
             raise INVALID_USAGE_ERROR
 
-        if isinstance(input, basestring):
+        if isinstance(input, string_types):
             with salt.utils.fopen(input, 'r') as ifile:
                 sls_templ = ifile.read()
         else:  # assume file-like
@@ -255,7 +257,7 @@ def rewrite_single_shorthand_state_decl(data):  # pylint: disable=C0103
         state.func: []
     '''
     for sid, states in data.items():
-        if isinstance(states, basestring):
+        if isinstance(states, string_types):
             data[sid] = {states: []}
 
 
@@ -264,7 +266,7 @@ def _parent_sls(sls):
     return sls[:i] + '.' if i != -1 else ''
 
 
-def rewrite_sls_includes_excludes(data, sls, env):
+def rewrite_sls_includes_excludes(data, sls, saltenv):
     # if the path of the included/excluded sls starts with a leading dot(.)
     # then it's taken to be relative to the including/excluding sls.
     sls = _parent_sls(sls)
@@ -275,7 +277,7 @@ def rewrite_sls_includes_excludes(data, sls, env):
                 if isinstance(each, dict):
                     slsenv, incl = each.popitem()
                 else:
-                    slsenv = env
+                    slsenv = saltenv
                     incl = each
                 if incl.startswith('.'):
                     includes[i] = {slsenv: (sls + incl[1:])}
@@ -380,8 +382,9 @@ def rename_state_ids(data, sls, is_extend=False):
                 for arg in args:
                     if isinstance(arg, dict) and iter(arg).next() == 'name':
                         break
-                else:  # then no '- name: ...' is defined in the state args
-                       # add the sid without the leading dot as the name.
+                else:
+                    # then no '- name: ...' is defined in the state args
+                    # add the sid without the leading dot as the name.
                     args.insert(0, dict(name=sid[1:]))
             data[newsid] = data[sid]
             del data[sid]

@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
 '''
 Module for gathering and managing information about MooseFS
 '''
 
 # Import salt libs
 import salt.utils
+
 
 def __virtual__():
     '''
@@ -142,7 +144,7 @@ def getgoal(path, opts=None):
     out = __salt__['cmd.run_all'](cmd)
 
     output = out['stdout'].splitlines()
-    if not 'r' in opts:
+    if 'r' not in opts:
         goal = output[0].split(': ')
         ret = {
             'goal': goal[1],

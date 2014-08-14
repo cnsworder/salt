@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Import Salt Testing libs
 from salttesting.helpers import ensure_in_syspath
 ensure_in_syspath('../../')
@@ -55,18 +57,28 @@ class StdTest(integration.ModuleCase):
                 'test.ping',
                 )
         self.assertIn('minion', ret)
-        self.assertEqual(ret['minion'], {'ret': True, 'success': True})
+        self.assertEqual({'ret': True, 'success': True}, ret['minion'])
 
         ret = self.client.cmd_full_return(
                 'minion',
                 'test.pong',
                 )
         self.assertIn('minion', ret)
-        self.assertEqual(
-            ret['minion'],
-            {'ret': '"test.pong" is not available.', 'success': False}
-        )
 
+        if self.master_opts['transport'] == 'zeromq':
+            self.assertEqual(
+                {
+                    'out': 'nested',
+                    'ret': '\'test.pong\' is not available.',
+                    'success': False
+                },
+                ret['minion']
+            )
+        elif self.master_opts['transport'] == 'raet':
+            self.assertEqual(
+                {'success': False, 'ret': '\'test.pong\' is not available.'},
+                ret['minion']
+            )
 
 if __name__ == '__main__':
     from integration import run_tests

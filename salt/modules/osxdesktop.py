@@ -1,6 +1,10 @@
+# -*- coding: utf-8 -*-
 '''
 Mac OS X implementations of various commands in the "desktop" interface
 '''
+
+# Define the module's virtual name
+__virtualname__ = 'desktop'
 
 
 def __virtual__():
@@ -8,7 +12,7 @@ def __virtual__():
     Only load on Mac systems
     '''
     if __grains__['os'] == 'MacOS':
-        return 'desktop'
+        return __virtualname__
     return False
 
 
@@ -84,5 +88,5 @@ def say(*words):
 
         salt '*' desktop.say <word0> <word1> ... <wordN>
     '''
-    cmd = 'say {}'.format(' '.join(words))
+    cmd = 'say {0}'.format(' '.join(words))
     return __salt__['cmd.run'](cmd)

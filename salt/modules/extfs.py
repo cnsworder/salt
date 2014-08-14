@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for managing ext2/3/4 file systems
 '''
@@ -17,7 +18,7 @@ def __virtual__():
     '''
     if salt.utils.is_windows():
         return False
-    return 'extfs'
+    return True
 
 
 def mkfs(device, fs_type, **kwargs):

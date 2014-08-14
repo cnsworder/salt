@@ -1,15 +1,24 @@
+# -*- coding: utf-8 -*-
 '''
 Return/control aspects of the grains data
 '''
 
 # Import python libs
+from __future__ import print_function
+import collections
 import math
+import operator
 import os
+import random
 import yaml
+import logging
 
 # Import salt libs
 import salt.utils
 import salt.utils.dictupdate
+from salt.exceptions import SaltException
+
+__proxyenabled__ = ['*']
 
 # Seed the grains dict so cython will build
 __grains__ = {}
@@ -21,12 +30,17 @@ __outputter__ = {
     'setval': 'grains',
 }
 
+# http://stackoverflow.com/a/12414913/127816
+_infinitedict = lambda: collections.defaultdict(_infinitedict)
+
+log = logging.getLogger(__name__)
+
 
 def _serial_sanitizer(instr):
     '''Replaces the last 1/4 of a string with X's'''
     length = len(instr)
     index = int(math.floor(length * .75))
-    return "{0}{1}".format(instr[:index], 'X' * (length - index))
+    return '{0}{1}'.format(instr[:index], 'X' * (length - index))
 
 
 _FQDN_SANITIZER = lambda x: 'MINION.DOMAINNAME'
@@ -47,7 +61,7 @@ _SANITIZERS = {
 }
 
 
-def get(key, default=''):
+def get(key, default='', delimiter=':'):
     '''
     Attempt to retrieve the named value from grains, if the named value is not
     available return the passed default. The default return is an empty string.
@@ -62,13 +76,43 @@ def get(key, default=''):
 
         pkg:apache
 
+
+    delimiter
+        Specify an alternate delimiter to use when traversing a nested dict
+
+        .. versionadded:: 2014.7.0
+
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' grains.get pkg:apache
     '''
-    return salt.utils.traverse_dict(__grains__, key, default)
+    return salt.utils.traverse_dict_and_list(__grains__,
+                                             key,
+                                             default,
+                                             delimiter)
+
+
+def has_value(key):
+    '''
+    Determine whether a named value exists in the grains dictionary.
+
+    Given a grains dictionary that contains the following structure::
+
+        {'pkg': {'apache': 'httpd'}}
+
+    One would determine if the apache key in the pkg dict exists by::
+
+        pkg:apache
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' grains.has_value pkg:apache
+    '''
+    return True if salt.utils.traverse_dict_and_list(__grains__, key, False) else False
 
 
 def items(sanitize=False):
@@ -127,17 +171,21 @@ def item(*args, **kwargs):
     return ret
 
 
-def setval(key, val):
+def setvals(grains, destructive=False):
     '''
-    Set a grains value in the grains config file
+    Set new grains values in the grains config file
+
+    :param Destructive: If an operation results in a key being removed, delete the key, too. Defaults to False.
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' grains.setval key val
-        salt '*' grains.setval key "{'sub-key': 'val', 'sub-key2': 'val2'}"
+        salt '*' grains.setvals "{'key1': 'val1', 'key2': 'val2'}"
     '''
+    new_grains = grains
+    if not isinstance(new_grains, collections.Mapping):
+        raise SaltException('setvals grains must be a dictionary.')
     grains = {}
     if os.path.isfile(__opts__['conf_file']):
         gfn = os.path.join(
@@ -163,24 +211,71 @@ def setval(key, val):
                 return 'Unable to read existing grains file: {0}'.format(e)
         if not isinstance(grains, dict):
             grains = {}
-    grains[key] = val
+    for key, val in new_grains.items():
+        if val is None and destructive is True:
+            if key in grains:
+                del grains[key]
+                if key in __grains__:
+                    del __grains__[key]
+        else:
+            grains[key] = val
+            __grains__[key] = val
+    # Cast defaultdict to dict; is there a more central place to put this?
+    yaml.representer.SafeRepresenter.add_representer(collections.defaultdict,
+            yaml.representer.SafeRepresenter.represent_dict)
     cstr = yaml.safe_dump(grains, default_flow_style=False)
-    with salt.utils.fopen(gfn, 'w+') as fp_:
-        fp_.write(cstr)
+    try:
+        with salt.utils.fopen(gfn, 'w+') as fp_:
+            fp_.write(cstr)
+    except (IOError, OSError):
+        msg = 'Unable to write to grains file at {0}. Check permissions.'
+        log.error(msg.format(gfn))
     fn_ = os.path.join(__opts__['cachedir'], 'module_refresh')
-    with salt.utils.fopen(fn_, 'w+') as fp_:
-        fp_.write('')
+    try:
+        with salt.utils.fopen(fn_, 'w+') as fp_:
+            fp_.write('')
+    except (IOError, OSError):
+        msg = 'Unable to write to cache file {0}. Check permissions.'
+        log.error(msg.format(fn_))
     # Sync the grains
     __salt__['saltutil.sync_grains']()
-    # Return the grain we just set to confirm everything was OK
-    return {key: val}
+    # Return the grains we just set to confirm everything was OK
+    return new_grains
 
 
-def append(key, val):
+def setval(key, val, destructive=False):
+    '''
+    Set a grains value in the grains config file
+
+    :param Destructive: If an operation results in a key being removed, delete the key, too. Defaults to False.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' grains.setval key val
+        salt '*' grains.setval key "{'sub-key': 'val', 'sub-key2': 'val2'}"
+    '''
+    return setvals({key: val}, destructive)
+
+
+def append(key, val, convert=False):
     '''
     .. versionadded:: 0.17.0
 
-    Append a value to a list in the grains config file
+    Append a value to a list in the grains config file. If the grain doesn't
+    exist, the grain key is added and the value is appended to the new grain
+    as a list item.
+
+    key
+        The grain key to be appended to
+
+    val
+        The value to append to the grain key
+
+    :param convert: If convert is True, convert non-list contents into a list.
+        If convert is False and the grain contains non-list contents, an error
+        is given. Defaults to False.
 
     CLI Example:
 
@@ -189,6 +284,8 @@ def append(key, val):
         salt '*' grains.append key val
     '''
     grains = get(key, [])
+    if not isinstance(grains, list) and convert is True:
+        grains = [grains]
     if not isinstance(grains, list):
         return 'The key {0} is not a valid list'.format(key)
     if val in grains:
@@ -218,11 +315,13 @@ def remove(key, val):
     return setval(key, grains)
 
 
-def delval(key):
+def delval(key, destructive=False):
     '''
     .. versionadded:: 0.17.0
 
     Delete a grain from the grains config file
+
+    :param Destructive: Delete the key, too. Defaults to False.
 
     CLI Example:
 
@@ -230,7 +329,8 @@ def delval(key):
 
         salt '*' grains.delval key
     '''
-    setval(key, None)
+
+    setval(key, None, destructive=destructive)
 
 
 def ls():  # pylint: disable=C0103
@@ -246,7 +346,7 @@ def ls():  # pylint: disable=C0103
     return sorted(__grains__)
 
 
-def filter_by(lookup_dict, grain='os_family', merge=None):
+def filter_by(lookup_dict, grain='os_family', merge=None, default='default'):
     '''
     .. versionadded:: 0.17.0
 
@@ -262,7 +362,7 @@ def filter_by(lookup_dict, grain='os_family', merge=None):
         {% set apache = salt['grains.filter_by']({
             'Debian': {'pkg': 'apache2', 'srv': 'apache2'},
             'RedHat': {'pkg': 'httpd', 'srv': 'httpd'},
-        }) %}
+        }), default='Debian' %}
 
         myapache:
           pkg:
@@ -306,16 +406,92 @@ def filter_by(lookup_dict, grain='os_family', merge=None):
         values for non-standard package names such as when using a different
         Python version from the default Python version provided by the OS
         (e.g., ``python26-mysql`` instead of ``python-mysql``).
+    :param default: default lookup_dict's key used if the grain does not exists
+         or if the grain value has no match on lookup_dict.
+
+         .. versionadded:: 2014.1.0
 
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' grains.filter_by '{Debian: Debheads rule, RedHat: I love my hat}'
+        # this one will render {D: {E: I, G: H}, J: K}
+        salt '*' grains.filter_by '{A: B, C: {D: {E: F,G: H}}}' 'xxx' '{D: {E: I},J: K}' 'C'
     '''
-    ret = lookup_dict.get(__grains__[grain], None)
+    ret = lookup_dict.get(
+            __grains__.get(
+                grain, default),
+            lookup_dict.get(
+                default, None)
+            )
 
     if merge:
-        salt.utils.dictupdate.update(ret, merge)
+        if not isinstance(merge, collections.Mapping):
+            raise SaltException('filter_by merge argument must be a dictionary.')
+
+        else:
+
+            if ret is None:
+                ret = merge
+
+            else:
+                salt.utils.dictupdate.update(ret, merge)
 
     return ret
+
+
+def _dict_from_path(path, val, delimiter=':'):
+    '''
+    Given a lookup string in the form of 'foo:bar:baz" return a nested
+    dictionary of the appropriate depth with the final segment as a value.
+
+    >>> _dict_from_path('foo:bar:baz', 'somevalue')
+    {"foo": {"bar": {"baz": "somevalue"}}
+    '''
+    nested_dict = _infinitedict()
+    keys = path.rsplit(delimiter)
+    lastplace = reduce(operator.getitem, keys[:-1], nested_dict)
+    lastplace[keys[-1]] = val
+
+    return nested_dict
+
+
+def get_or_set_hash(name,
+        length=8,
+        chars='abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*(-_=+)'):
+    '''
+    Perform a one-time generation of a hash and write it to the local grains.
+    If that grain has already been set return the value instead.
+
+    This is useful for generating passwords or keys that are specific to a
+    single minion that don't need to be stored somewhere centrally.
+
+    State Example:
+
+    .. code-block:: yaml
+
+        some_mysql_user:
+          mysql_user:
+            - present
+            - host: localhost
+            - password: {{ salt['grains.get_or_set_hash']('mysql:some_mysql_user') }}
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' grains.get_or_set_hash 'django:SECRET_KEY' 50
+    '''
+    ret = get(name, None)
+
+    if ret is None:
+        val = ''.join([random.choice(chars) for _ in range(length)])
+
+        if ':' in name:
+            name, rest = name.split(':', 1)
+            val = _dict_from_path(rest, val)
+
+        setval(name, val)
+
+    return get(name)

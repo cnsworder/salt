@@ -9,7 +9,6 @@ Full list of builtin execution modules
     .. toctree::
 
         salt.modules.pkg
-        salt.modules.sys
 
 .. currentmodule:: salt.modules
 
@@ -20,16 +19,30 @@ Full list of builtin execution modules
     aliases
     alternatives
     apache
-    apt
+    aptpkg
     archive
     at
     augeas_cfg
+    aws_sqs
+    blockdev
     bluez
+    boto_asg
+    boto_cloudwatch
+    boto_elasticache
+    boto_elb
+    boto_iam
+    boto_route53
+    boto_secgroup
+    boto_sqs
     brew
     bridge
     bsd_shadow
     cassandra
+    chef
+    chocolatey
+    cloud
     cmdmod
+    composer
     config
     cp
     cron
@@ -37,17 +50,23 @@ Full list of builtin execution modules
     darwin_sysctl
     data
     ddns
+    deb_apache
     debconfmod
+    debian_ip
     debian_service
+    defaults
     dig
     disk
     djangomod
     dnsmasq
     dnsutil
+    dockerio
     dpkg
     ebuild
     eix
+    environ
     eselect
+    etcd_mod
     event
     extfs
     file
@@ -55,20 +74,34 @@ Full list of builtin execution modules
     freebsdjail
     freebsdkmod
     freebsdpkg
+    freebsdports
     freebsdservice
     gem
+    genesis
     gentoo_service
     gentoolkitmod
     git
     glance
+    glusterfs
+    gnomedesktop
     grains
     groupadd
     grub_legacy
     guestfs
+    hadoop
+    haproxyconn
+    hashutil
     hg
     hosts
+    htpasswd
     img
+    incron
+    influx
+    ini_manage
+    introspect
+    ipset
     iptables
+    junos
     key
     keyboard
     keystone
@@ -81,11 +114,19 @@ Full list of builtin execution modules
     linux_sysctl
     localemod
     locate
+    logadm
     logrotate
+    lvs
+    lxc
+    mac_group
+    mac_user
+    macports
     makeconf
     match
     mdadm
+    memcached
     mine
+    mod_random
     modjk
     mongodb
     monit
@@ -93,18 +134,23 @@ Full list of builtin execution modules
     mount
     munin
     mysql
+    nagios
     netbsd_sysctl
     netbsdservice
     network
     nfs3
+    nftables
     nginx
     nova
     npm
-    nzbget
+    omapi
     openbsdpkg
     openbsdservice
+    openstack_config
+    oracle
     osxdesktop
     pacman
+    pagerduty
     pam
     parted
     pecl
@@ -115,32 +161,50 @@ Full list of builtin execution modules
     pkgng
     pkgutil
     portage_config
+    postfix
     postgres
     poudriere
+    powerpath
     ps
     publish
     puppet
     pw_group
     pw_user
+    pyenv
     qemu_img
     qemu_nbd
     quota
     rabbitmq
+    raet_publish
     rbenv
+    rdp
+    redismod
     reg
+    rest_package
+    rest_sample
+    rest_service
     ret
     rh_ip
     rh_service
+    riak
     rpm
+    rsync
     rvm
     s3
+    saltcloudmod
     saltutil
+    schedule
+    seed
     selinux
+    sensors
+    serverdensity_device
     service
     shadow
     smartos_imgadm
     smartos_vmadm
     smf
+    smtp
+    softwareupdate
     solaris_group
     solaris_shadow
     solaris_user
@@ -152,6 +216,7 @@ Full list of builtin execution modules
     status
     supervisord
     svn
+    swift
     sysbench
     sysmod
     system
@@ -160,23 +225,38 @@ Full list of builtin execution modules
     timezone
     tls
     tomcat
+    twilio_notify
     upstart
     useradd
+    uwsgi
+    varnish
     virt
     virtualenv_mod
+    win_autoruns
     win_disk
+    win_dns_client
     win_file
+    win_firewall
     win_groupadd
+    win_ip
     win_network
+    win_ntp
+    win_path
     win_pkg
+    win_repo
+    win_servermanager
     win_service
     win_shadow
     win_status
     win_system
+    win_timezone
+    win_update
     win_useradd
     xapi
+    xmpp
     yumpkg
-    yumpkg5
+    zcbuildout
     zfs
+    znc
     zpool
     zypper

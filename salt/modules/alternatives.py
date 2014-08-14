@@ -1,14 +1,8 @@
 # -*- coding: utf-8 -*-
 '''
-    salt.modules.alternatives
-    ~~~~~~~~~~~~~~~~~~~~~~~~~
+Support for Alternatives system
 
-    Support for Alternatives system
-
-    :codeauthor: Radek Rada <radek.rada@gmail.com>
-    :copyright: © 2012 by the SaltStack Team, see AUTHORS for more details.
-    :license: Apache 2.0, see LICENSE for more details.
-
+:codeauthor: Radek Rada <radek.rada@gmail.com>
 '''
 
 # Import python libs
@@ -23,13 +17,18 @@ __outputter__ = {
 
 log = logging.getLogger(__name__)
 
+# Don't shadow built-in's.
+__func_alias__ = {
+    'set_': 'set'
+}
+
 
 def __virtual__():
     '''
     Only if alternatives dir is available
     '''
     if os.path.isdir('/etc/alternatives'):
-        return 'alternatives'
+        return True
     return False
 
 
@@ -52,9 +51,8 @@ def display(name):
 
         salt '*' alternatives.display editor
     '''
-
-    cmd = '{0} --display {1}'.format(_get_cmd(), name)
-    out = __salt__['cmd.run_all'](cmd)
+    cmd = [_get_cmd(), '--display', name]
+    out = __salt__['cmd.run_all'](cmd, python_shell=False)
     if out['retcode'] > 0 and out['stderr'] != '':
         return out['stderr']
     return out['stdout']
@@ -105,10 +103,8 @@ def install(name, link, path, priority):
 
         salt '*' alternatives.install editor /usr/bin/editor /usr/bin/emacs23 50
     '''
-
-    cmd = '{0} --install {1} {2} {3} {4}'.format(_get_cmd(), link, name,
-                                                 path, priority)
-    out = __salt__['cmd.run_all'](cmd)
+    cmd = [_get_cmd(), '--install', link, name, path, str(priority)]
+    out = __salt__['cmd.run_all'](cmd, python_shell=False)
     if out['retcode'] > 0 and out['stderr'] != '':
         return out['stderr']
     return out['stdout']
@@ -124,9 +120,43 @@ def remove(name, path):
 
         salt '*' alternatives.remove name path
     '''
+    cmd = [_get_cmd(), '--remove', name, path]
+    out = __salt__['cmd.run_all'](cmd, python_shell=False)
+    if out['retcode'] > 0:
+        return out['stderr']
+    return out['stdout']
 
-    cmd = '{0} --remove {1} {2}'.format(_get_cmd(), name, path)
-    out = __salt__['cmd.run_all'](cmd)
+
+def auto(name):
+    '''
+    Trigger alternatives to set the path for <name> as
+    specified by priority.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' alternatives.auto name
+    '''
+    cmd = [_get_cmd(), '--auto', name]
+    out = __salt__['cmd.run_all'](cmd, python_shell=False)
+    if out['retcode'] > 0:
+        return out['stderr']
+    return out['stdout']
+
+
+def set_(name, path):
+    '''
+    Manually set the alternative <path> for <name>.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' alternatives.set name path
+    '''
+    cmd = [_get_cmd(), '--set', name, path]
+    out = __salt__['cmd.run_all'](cmd, python_shell=False)
     if out['retcode'] > 0:
         return out['stderr']
     return out['stdout']

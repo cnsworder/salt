@@ -1,3 +1,5 @@
+.. _states-top:
+
 ============
 The Top File
 ============
@@ -7,15 +9,23 @@ the state system. The top file creates a few general abstractions. First it
 maps what nodes should pull from which environments, next it defines which
 matches systems should draw from.
 
+.. _states-top-environments:
+
 Environments
 ============
 
-.. glossary::
+Environments allow conceptually organizing state tree directories. Environments
+can be made to be self-contained or state trees can be made to bleed through
+environments.
 
-    Environment
-        A configuration that allows conceptually organizing state tree
-        directories. Environments can be made to be self-contained or state
-        trees can be made to bleed through environments.
+.. note::
+
+    Environments in Salt are very flexible, this section defines how the top
+    file can be used to define what states from what environments are to be
+    used for specific minions.
+
+    If the intent is to bind minions to specific environments, then the
+    `environment` option can be set in the minion configuration file.
 
 The environments in the top file corresponds with the environments defined in
 the :conf_master:`file_roots` variable. In a simple, single environment setup
@@ -239,10 +249,11 @@ are set as in the :ref:`above multi-environment example
 
 1. The ``base`` environment's top file is processed first. Any environment which
    is defined in the ``base`` top.sls as well as another environment's top file,
-   will use the states configured in ``base`` and ignore all other instances.
-   In other words, the ``base`` top file is authoritative. Therefore, in the
-   example below, the ``dev`` section in ``/srv/salt/dev/top.sls`` would be
-   completely ignored.
+   will use the instance of the environment configured in ``base`` and ignore
+   all other instances.  In other words, the ``base`` top file is
+   authoritative when defining environments. Therefore, in the example below,
+   the ``dev`` section in ``/srv/salt/dev/top.sls`` would be completely
+   ignored.
 
 ``/srv/salt/base/top.sls:``
 
@@ -294,7 +305,7 @@ are set as in the :ref:`above multi-environment example
       'db*dev*':
         - db
 
-``/srv/salt/qa/topsls:``
+``/srv/salt/qa/top.sls:``
 
 .. code-block:: yaml
 

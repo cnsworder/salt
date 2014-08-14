@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Import python libs
 import os
 import sys
@@ -5,21 +7,25 @@ import tempfile
 
 # Import Salt Testing libs
 from salttesting import skipIf
-from salttesting.helpers import ensure_in_syspath
+from salttesting.helpers import ensure_in_syspath, skip_if_binaries_missing
+from salttesting.mock import NO_MOCK, NO_MOCK_REASON, Mock, patch
 ensure_in_syspath('../../')
 
 # Import salt libs
 import integration
-
-try:
-    from mock import Mock, patch
-    has_mock = True
-except ImportError:
-    has_mock = False
-    patch = lambda x: lambda y: None
+import salt.utils
 
 
-@skipIf(has_mock is False, 'mock python module is unavailable')
+AVAILABLE_PYTHON_EXECUTABLE = salt.utils.which_bin([
+    'python',
+    'python2',
+    'python2.6',
+    'python2.7'
+
+])
+
+
+@skipIf(NO_MOCK, NO_MOCK_REASON)
 class CMDModuleTest(integration.ModuleCase):
     '''
     Validate the cmd module
@@ -43,13 +49,15 @@ class CMDModuleTest(integration.ModuleCase):
     @patch('pwd.getpwnam')
     @patch('subprocess.Popen')
     @patch('json.loads')
-    def test_os_environment_remains_intact(self, *mocks):
+    def test_os_environment_remains_intact(self,
+                                           loads_mock,
+                                           popen_mock,
+                                           getpwnam_mock):
         '''
         Make sure the OS environment is not tainted after running a command
         that specifies runas.
         '''
         environment = os.environ.copy()
-        loads_mock, popen_mock, getpwnam_mock = mocks
 
         popen_mock.return_value = Mock(
             communicate=lambda *args, **kwags: ['{}', None],
@@ -75,7 +83,7 @@ class CMDModuleTest(integration.ModuleCase):
 
             environment2 = os.environ.copy()
 
-            self.assertEquals(environment, environment2)
+            self.assertEqual(environment, environment2)
 
             getpwnam_mock.assert_called_with('foobar')
             loads_mock.assert_called_with('{}')
@@ -135,6 +143,7 @@ class CMDModuleTest(integration.ModuleCase):
         self.assertEqual(self.run_function('cmd.retcode', ['exit 0']), 0)
         self.assertEqual(self.run_function('cmd.retcode', ['exit 1']), 1)
 
+    @skip_if_binaries_missing(['which'])
     def test_which(self):
         '''
         cmd.which
@@ -146,7 +155,8 @@ class CMDModuleTest(integration.ModuleCase):
         '''
         cmd.has_exec
         '''
-        self.assertTrue(self.run_function('cmd.has_exec', ['python']))
+        self.assertTrue(self.run_function('cmd.has_exec',
+                                          [AVAILABLE_PYTHON_EXECUTABLE]))
         self.assertFalse(self.run_function('cmd.has_exec',
                                            ['alllfsdfnwieulrrh9123857ygf']))
 
@@ -159,7 +169,8 @@ import sys
 sys.stdout.write('cheese')
         '''
         self.assertEqual(self.run_function('cmd.exec_code',
-                                           ['python', code]).rstrip(),
+                                           [AVAILABLE_PYTHON_EXECUTABLE,
+                                            code]).rstrip(),
                          'cheese')
 
     def test_quotes(self):
@@ -181,7 +192,7 @@ sys.stdout.write('cheese')
 
         try:
             runas = os.getlogin()
-        except:
+        except:  # pylint: disable=W0702
             # On some distros (notably Gentoo) os.getlogin() fails
             import pwd
             runas = pwd.getpwuid(os.getuid())[0]
@@ -206,6 +217,22 @@ sys.stdout.write('cheese')
             'hello' == self.run_function(
                 'cmd.run', ['sleep 1 && echo hello', 'timeout=2']))
 
+    def test_run_cwd_doesnt_exist_issue_7154(self):
+        '''
+        cmd.run should fail and raise
+        salt.exceptions.CommandExecutionError if the cwd dir does not
+        exist
+        '''
+        from salt.exceptions import CommandExecutionError
+        import salt.modules.cmdmod as cmdmod
+        cmd = 'echo OHAI'
+        cwd = '/path/to/nowhere'
+        try:
+            cmdmod.run_all(cmd, cwd=cwd)
+        except CommandExecutionError:
+            pass
+        else:
+            raise RuntimeError
 
 if __name__ == '__main__':
     from integration import run_tests

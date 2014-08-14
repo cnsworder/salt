@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
 '''
-Module for handling openstack nova calls.
+Module for handling OpenStack Nova calls
 
 :depends:   - novaclient Python module
 :configuration: This module is not usable until the user, password, tenant, and
@@ -10,20 +11,43 @@ Module for handling openstack nova calls.
         keystone.password: verybadpass
         keystone.tenant: admin
         keystone.auth_url: 'http://127.0.0.1:5000/v2.0/'
+        # Optional
+        keystone.region_name: 'regionOne'
+
+    If configuration for multiple OpenStack accounts is required, they can be
+    set up as different configuration profiles:
+    For example::
+
+        openstack1:
+          keystone.user: admin
+          keystone.password: verybadpass
+          keystone.tenant: admin
+          keystone.auth_url: 'http://127.0.0.1:5000/v2.0/'
+
+        openstack2:
+          keystone.user: admin
+          keystone.password: verybadpass
+          keystone.tenant: admin
+          keystone.auth_url: 'http://127.0.0.2:5000/v2.0/'
+
+    With this configuration in place, any of the nova functions can make use of
+    a configuration profile by declaring it explicitly.
+    For example::
+
+        salt '*' nova.flavor_list profile=openstack1
 '''
 
-# Import third party libs
-HAS_NOVA = False
-try:
-    from novaclient.v1_1 import client
-    HAS_NOVA = True
-except ImportError:
-    pass
+# Import python libs
+import logging
 
 # Import salt libs
-import salt.utils
+import salt.utils.openstack.nova as suon
 
-# Function alias to not shadow built-in's
+
+# Get logging started
+log = logging.getLogger(__name__)
+
+# Function alias to not shadow built-ins
 __func_alias__ = {
     'list_': 'list'
 }
@@ -34,28 +58,324 @@ def __virtual__():
     Only load this module if nova
     is installed on this minion.
     '''
-    if HAS_NOVA:
-        return 'nova'
-    return False
+    return suon.check_nova()
 
 
 __opts__ = {}
 
 
-def _auth():
+def _auth(profile=None):
     '''
     Set up nova credentials
     '''
-    user = __salt__['config.option']('keystone.user')
-    password = __salt__['config.option']('keystone.password')
-    tenant = __salt__['config.option']('keystone.tenant')
-    auth_url = __salt__['config.option']('keystone.auth_url')
-    return client.Client(
-        user, password, tenant, auth_url, service_type="compute"
+    if profile:
+        credentials = __salt__['config.option'](profile)
+        user = credentials['keystone.user']
+        password = credentials['keystone.password']
+        tenant = credentials['keystone.tenant']
+        auth_url = credentials['keystone.auth_url']
+        region_name = credentials.get('keystone.region_name', None)
+        api_key = credentials.get('keystone.api_key', None)
+        os_auth_system = credentials.get('keystone.os_auth_system', None)
+    else:
+        user = __salt__['config.option']('keystone.user')
+        password = __salt__['config.option']('keystone.password')
+        tenant = __salt__['config.option']('keystone.tenant')
+        auth_url = __salt__['config.option']('keystone.auth_url')
+        region_name = __salt__['config.option']('keystone.region_name')
+        api_key = __salt__['config.option']('keystone.api_key')
+        os_auth_system = __salt__['config.option']('keystone.os_auth_system')
+    kwargs = {
+        'username': user,
+        'password': password,
+        'api_key': api_key,
+        'project_id': tenant,
+        'auth_url': auth_url,
+        'region_name': region_name,
+        'os_auth_plugin': os_auth_system
+    }
+
+    return suon.SaltNova(**kwargs)
+
+
+def boot(name, flavor_id=0, image_id=0, profile=None, timeout=300):
+    '''
+    Boot (create) a new instance
+
+    name
+        Name of the new instance (must be first)
+
+    flavor_id
+        Unique integer ID for the flavor
+
+    image_id
+        Unique integer ID for the image
+
+    timeout
+        How long to wait, after creating the instance, for the provider to
+        return information about it (default 300 seconds).
+
+        .. versionadded:: 2014.1.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.boot myinstance flavor_id=4596 image_id=2
+
+    The flavor_id and image_id are obtained from nova.flavor_list and
+    nova.image_list
+
+    .. code-block:: bash
+
+        salt '*' nova.flavor_list
+        salt '*' nova.image_list
+    '''
+    conn = _auth(profile)
+    return conn.boot(name, flavor_id, image_id, timeout)
+
+
+def volume_list(search_opts=None, profile=None):
+    '''
+    List storage volumes
+
+    search_opts
+        Dictionary of search options
+
+    profile
+        Profile to use
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.volume_list \
+                search_opts='{"display_name": "myblock"}' \
+                profile=openstack
+
+    '''
+    conn = _auth(profile)
+    return conn.volume_list(search_opts=search_opts)
+
+
+def volume_show(name, profile=None):
+    '''
+    Create a block storage volume
+
+    name
+        Name of the volume
+
+    profile
+        Profile to use
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.volume_show myblock profile=openstack
+
+    '''
+    conn = _auth(profile)
+    return conn.volume_show(name)
+
+
+def volume_create(name, size=100, snapshot=None, voltype=None,
+                  profile=None):
+    '''
+    Create a block storage volume
+
+    name
+        Name of the new volume (must be first)
+
+    size
+        Volume size
+
+    snapshot
+        Block storage snapshot id
+
+    voltype
+        Type of storage
+
+    profile
+        Profile to build on
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.volume_create myblock size=300 profile=openstack
+
+    '''
+    conn = _auth(profile)
+    return conn.volume_create(
+        name,
+        size,
+        snapshot,
+        voltype
     )
 
 
-def flavor_list():
+def volume_delete(name, profile=None):
+    '''
+    Destroy the volume
+
+    name
+        Name of the volume
+
+    profile
+        Profile to build on
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.volume_delete myblock profile=openstack
+
+    '''
+    conn = _auth(profile)
+    return conn.volume_delete(name)
+
+
+def volume_detach(name,
+                  profile=None,
+                  timeout=300):
+    '''
+    Attach a block storage volume
+
+    name
+        Name of the new volume to attach
+
+    server_name
+        Name of the server to detach from
+
+    profile
+        Profile to build on
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.volume_detach myblock profile=openstack
+
+    '''
+    conn = _auth(profile)
+    return conn.volume_detach(
+        name,
+        timeout
+    )
+
+
+def volume_attach(name,
+                  server_name,
+                  device='/dev/xvdb',
+                  profile=None,
+                  timeout=300):
+    '''
+    Attach a block storage volume
+
+    name
+        Name of the new volume to attach
+
+    server_name
+        Name of the server to attach to
+
+    device
+        Name of the device on the server
+
+    profile
+        Profile to build on
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.volume_attach myblock slice.example.com profile=openstack
+        salt '*' nova.volume_attach myblock server.example.com \
+                device='/dev/xvdb' profile=openstack
+
+    '''
+    conn = _auth(profile)
+    return conn.volume_attach(
+        name,
+        server_name,
+        device,
+        timeout
+    )
+
+
+def suspend(instance_id, profile=None):
+    '''
+    Suspend an instance
+
+    instance_id
+        ID of the instance to be suspended
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.suspend 1138
+
+    '''
+    conn = _auth(profile)
+    return conn.suspend(instance_id)
+
+
+def resume(instance_id, profile=None):
+    '''
+    Resume an instance
+
+    instance_id
+        ID of the instance to be resumed
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.resume 1138
+
+    '''
+    conn = _auth(profile)
+    return conn.resume(instance_id)
+
+
+def lock(instance_id, profile=None):
+    '''
+    Lock an instance
+
+    instance_id
+        ID of the instance to be locked
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.lock 1138
+
+    '''
+    conn = _auth(profile)
+    return conn.lock(instance_id)
+
+
+def delete(instance_id, profile=None):
+    '''
+    Delete an instance
+
+    instance_id
+        ID of the instance to be deleted
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.delete 1138
+
+    '''
+    conn = _auth(profile)
+    return conn.delete(instance_id)
+
+
+def flavor_list(profile=None):
     '''
     Return a list of available flavors (nova flavor-list)
 
@@ -65,58 +385,49 @@ def flavor_list():
 
         salt '*' nova.flavor_list
     '''
-    nt_ks = _auth()
-    ret = {}
-    for flavor in nt_ks.flavors.list():
-        links = {}
-        for link in flavor.links:
-            links[link['rel']] = link['href']
-        ret[flavor.name] = {
-                'disk': flavor.disk,
-                'id': flavor.id,
-                'name': flavor.name,
-                'ram': flavor.ram,
-                'rxtx_factor': flavor.rxtx_factor,
-                'swap': flavor.swap,
-                'vcpus': flavor.vcpus,
-                'links': links,
-            }
-    return ret
+    conn = _auth(profile)
+    return conn.flavor_list()
 
 
 def flavor_create(name,      # pylint: disable=C0103
-                  id=0,      # pylint: disable=C0103
+                  flavor_id=0,      # pylint: disable=C0103
                   ram=0,
                   disk=0,
-                  vcpus=1):
+                  vcpus=1,
+                  profile=None):
     '''
     Add a flavor to nova (nova flavor-create). The following parameters are
     required:
 
-    <name>   Name of the new flavor (must be first)
-    <id>     Unique integer ID for the new flavor
-    <ram>    Memory size in MB
-    <disk>   Disk size in GB
-    <vcpus>  Number of vcpus
+    name
+        Name of the new flavor (must be first)
+    flavor_id
+        Unique integer ID for the new flavor
+    ram
+        Memory size in MB
+    disk
+        Disk size in GB
+    vcpus
+        Number of vcpus
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' nova.flavor_create myflavor id=6 ram=4096 disk=10 vcpus=1
+        salt '*' nova.flavor_create myflavor flavor_id=6 \
+                ram=4096 disk=10 vcpus=1
     '''
-    nt_ks = _auth()
-    nt_ks.flavors.create(
-        name=name, flavorid=id, ram=ram, disk=disk, vcpus=vcpus
+    conn = _auth(profile)
+    return conn.flavor_create(
+        name,
+        flavor_id,
+        ram,
+        disk,
+        vcpus
     )
-    return {'name': name,
-            'id': id,
-            'ram': ram,
-            'disk': disk,
-            'vcpus': vcpus}
 
 
-def flavor_delete(id):  # pylint: disable=C0103
+def flavor_delete(flavor_id, profile=None):  # pylint: disable=C0103
     '''
     Delete a flavor from nova by id (nova flavor-delete)
 
@@ -124,14 +435,13 @@ def flavor_delete(id):  # pylint: disable=C0103
 
     .. code-block:: bash
 
-        salt '*' nova.flavor_delete 7'
+        salt '*' nova.flavor_delete 7
     '''
-    nt_ks = _auth()
-    nt_ks.flavors.delete(id)
-    return 'Flavor deleted: {0}'.format(id)
+    conn = _auth(profile)
+    return conn.flavor_delete(flavor_id)
 
 
-def keypair_list():
+def keypair_list(profile=None):
     '''
     Return a list of available keypairs (nova keypair-list)
 
@@ -141,18 +451,11 @@ def keypair_list():
 
         salt '*' nova.keypair_list
     '''
-    nt_ks = _auth()
-    ret = {}
-    for keypair in nt_ks.keypairs.list():
-        ret[keypair.name] = {
-                'name': keypair.name,
-                'fingerprint': keypair.fingerprint,
-                'public_key': keypair.public_key,
-            }
-    return ret
+    conn = _auth(profile)
+    return conn.keypair_list()
 
 
-def keypair_add(name, pubfile=None, pubkey=None):
+def keypair_add(name, pubfile=None, pubkey=None, profile=None):
     '''
     Add a keypair to nova (nova keypair-add)
 
@@ -161,20 +464,17 @@ def keypair_add(name, pubfile=None, pubkey=None):
     .. code-block:: bash
 
         salt '*' nova.keypair_add mykey pubfile='/home/myuser/.ssh/id_rsa.pub'
-        salt '*' nova.keypair_add mykey pubkey='ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAuGj4A7HcPLPl/etc== myuser@mybox'
+        salt '*' nova.keypair_add mykey pubkey='ssh-rsa <key> myuser@mybox'
     '''
-    nt_ks = _auth()
-    if pubfile:
-        ifile = salt.utils.fopen(pubfile, 'r')
-        pubkey = ifile.read()
-    if not pubkey:
-        return False
-    nt_ks.keypairs.create(name, public_key=pubkey)
-    ret = {'name': name, 'pubkey': pubkey}
-    return ret
+    conn = _auth(profile)
+    return conn.keypair_add(
+        name,
+        pubfile,
+        pubkey
+    )
 
 
-def keypair_delete(name):
+def keypair_delete(name, profile=None):
     '''
     Add a keypair to nova (nova keypair-delete)
 
@@ -184,12 +484,11 @@ def keypair_delete(name):
 
         salt '*' nova.keypair_delete mykey'
     '''
-    nt_ks = _auth()
-    nt_ks.keypairs.delete(name)
-    return 'Keypair deleted: {0}'.format(name)
+    conn = _auth(profile)
+    return conn.keypair_delete(name)
 
 
-def image_list(name=None):
+def image_list(name=None, profile=None):
     '''
     Return a list of available images (nova images-list + nova image-show)
     If a name is provided, only that image will be displayed.
@@ -201,30 +500,14 @@ def image_list(name=None):
         salt '*' nova.image_list
         salt '*' nova.image_list myimage
     '''
-    nt_ks = _auth()
-    ret = {}
-    for image in nt_ks.images.list():
-        links = {}
-        for link in image.links:
-            links[link['rel']] = link['href']
-        ret[image.name] = {
-                'name': image.name,
-                'id': image.id,
-                'status': image.status,
-                'progress': image.progress,
-                'created': image.created,
-                'updated': image.updated,
-                'minDisk': image.minDisk,
-                'minRam': image.minRam,
-                'metadata': image.metadata,
-                'links': links,
-            }
-    if name:
-        return {name: ret[name]}
-    return ret
+    conn = _auth(profile)
+    return conn.image_list(name)
 
 
-def image_meta_set(id=None, name=None, **kwargs):  # pylint: disable=C0103
+def image_meta_set(image_id=None,
+                   name=None,
+                   profile=None,
+                   **kwargs):  # pylint: disable=C0103
     '''
     Sets a key=value pair in the metadata for an image (nova image-meta set)
 
@@ -232,56 +515,53 @@ def image_meta_set(id=None, name=None, **kwargs):  # pylint: disable=C0103
 
     .. code-block:: bash
 
-        salt '*' nova.image_meta_set id=6f52b2ff-0b31-4d84-8fd1-af45b84824f6 cheese=gruyere
+        salt '*' nova.image_meta_set 6f52b2ff-0b31-4d84-8fd1-af45b84824f6 \
+                cheese=gruyere
         salt '*' nova.image_meta_set name=myimage salad=pasta beans=baked
     '''
-    nt_ks = _auth()
-    if name:
-        for image in nt_ks.images.list():
-            if image.name == name:
-                id = image.id  # pylint: disable=C0103
-    if not id:
-        return {'Error': 'A valid image name or id was not specified'}
-    nt_ks.images.set_meta(id, kwargs)
-    return {id: kwargs}
+    conn = _auth(profile)
+    return conn.image_meta_set(
+        image_id,
+        name,
+        **kwargs
+    )
 
 
-def image_meta_delete(id=None,     # pylint: disable=C0103
+def image_meta_delete(image_id=None,     # pylint: disable=C0103
                       name=None,
-                      keys=None):
+                      keys=None,
+                      profile=None):
     '''
-    Delete a key=value pair from the metadata for an image (nova image-meta set)
+    Delete a key=value pair from the metadata for an image
+    (nova image-meta set)
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' nova.image_meta_delete id=6f52b2ff-0b31-4d84-8fd1-af45b84824f6 keys=cheese
+        salt '*' nova.image_meta_delete \
+                6f52b2ff-0b31-4d84-8fd1-af45b84824f6 keys=cheese
         salt '*' nova.image_meta_delete name=myimage keys=salad,beans
     '''
-    nt_ks = _auth()
-    if name:
-        for image in nt_ks.images.list():
-            if image.name == name:
-                id = image.id  # pylint: disable=C0103
-    pairs = keys.split(',')
-    if not id:
-        return {'Error': 'A valid image name or id was not specified'}
-    nt_ks.images.delete_meta(id, pairs)
-    return {id: 'Deleted: {0}'.format(pairs)}
+    conn = _auth(profile)
+    return conn.image_meta_delete(
+        image_id,
+        name,
+        keys
+    )
 
 
-def list_():
+def list_(profile=None):
     '''
     To maintain the feel of the nova command line, this function simply calls
     the server_list function.
     '''
-    return server_list()
+    return server_list(profile=profile)
 
 
-def server_list():
+def server_list(profile=None):
     '''
-    Return detailed information for an active server
+    Return list of active servers
 
     CLI Example:
 
@@ -289,28 +569,14 @@ def server_list():
 
         salt '*' nova.show
     '''
-    nt_ks = _auth()
-    ret = {}
-    for item in nt_ks.servers.list():
-        ret[item.name] = {
-            'id': item.id,
-            'name': item.name,
-            'status': item.status,
-            }
-    return ret
+    conn = _auth(profile)
+    return conn.server_list()
 
 
-def show(server_id):
+def show(server_id, profile=None):
     '''
     To maintain the feel of the nova command line, this function simply calls
     the server_show function.
-    '''
-    return server_show(server_id)
-
-
-def server_show(server_id):
-    '''
-    Return detailed information for an active server
 
     CLI Example:
 
@@ -318,44 +584,38 @@ def server_show(server_id):
 
         salt '*' nova.show
     '''
-    nt_ks = _auth()
-    ret = {}
-    for item in nt_ks.servers.list():
-        if item.id == server_id:
-            ret[item.name] = {
-                'OS-DCF': {'diskConfig': item.__dict__['OS-DCF:diskConfig']},
-                'OS-EXT-SRV-ATTR': {'host': item.__dict__['OS-EXT-SRV-ATTR:host'],
-                                    'hypervisor_hostname': item.__dict__['OS-EXT-SRV-ATTR:hypervisor_hostname'],
-                                    'instance_name': item.__dict__['OS-EXT-SRV-ATTR:instance_name']},
-                'OS-EXT-STS': {'power_state': item.__dict__['OS-EXT-STS:power_state'],
-                               'task_state': item.__dict__['OS-EXT-STS:task_state'],
-                               'vm_state': item.__dict__['OS-EXT-STS:vm_state']},
-                'accessIPv4': item.accessIPv4,
-                'accessIPv6': item.accessIPv6,
-                'addresses': item.addresses,
-                'config_drive': item.config_drive,
-                'created': item.created,
-                'flavor': {'id': item.flavor['id'],
-                           'links': item.flavor['links']},
-                'hostId': item.hostId,
-                'id': item.id,
-                'image': {'id': item.image['id'],
-                           'links': item.image['links']},
-                'key_name': item.key_name,
-                'links': item.links,
-                'metadata': item.metadata,
-                'name': item.name,
-                'progress': item.progress,
-                'security_groups': item.security_groups,
-                'status': item.status,
-                'tenant_id': item.tenant_id,
-                'updated': item.updated,
-                'user_id': item.user_id,
-                }
-    return ret
+    return server_show(server_id, profile)
 
 
-def secgroup_create(name, description):
+def server_list_detailed(profile=None):
+    '''
+    Return detailed list of active servers
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.server_list_detailed
+    '''
+    conn = _auth(profile)
+    return conn.server_list_detailed()
+
+
+def server_show(server_id, profile=None):
+    '''
+    Return detailed information for an active server
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' nova.server_show <server_id>
+    '''
+    conn = _auth(profile)
+    return conn.server_show(server_id)
+
+
+def secgroup_create(name, description, profile=None):
     '''
     Add a secgroup to nova (nova secgroup-create)
 
@@ -365,13 +625,11 @@ def secgroup_create(name, description):
 
         salt '*' nova.secgroup_create mygroup 'This is my security group'
     '''
-    nt_ks = _auth()
-    nt_ks.security_groups.create(name, description)
-    ret = {'name': name, 'description': description}
-    return ret
+    conn = _auth(profile)
+    return conn.secgroup_create(name, description)
 
 
-def secgroup_delete(name):
+def secgroup_delete(name, profile=None):
     '''
     Delete a secgroup to nova (nova secgroup-delete)
 
@@ -381,15 +639,11 @@ def secgroup_delete(name):
 
         salt '*' nova.secgroup_delete mygroup
     '''
-    nt_ks = _auth()
-    for item in nt_ks.security_groups.list():
-        if item.name == name:
-            nt_ks.security_groups.delete(item.id)
-            return {name: 'Deleted security group: {0}'.format(name)}
-    return 'Security group not found: {0}'.format(name)
+    conn = _auth(profile)
+    return conn.secgroup_delete(name)
 
 
-def secgroup_list():
+def secgroup_list(profile=None):
     '''
     Return a list of available security groups (nova items-list)
 
@@ -399,38 +653,26 @@ def secgroup_list():
 
         salt '*' nova.secgroup_list
     '''
-    nt_ks = _auth()
-    ret = {}
-    for item in nt_ks.security_groups.list():
-        ret[item.name] = {
-                'name': item.name,
-                'description': item.description,
-                'id': item.id,
-                'tenant_id': item.tenant_id,
-                'rules': item.rules,
-            }
-    return ret
+    conn = _auth(profile)
+    return conn.secgroup_list()
 
 
-def _item_list():
+def server_by_name(name, profile=None):
     '''
-    Template for writing list functions
-    Return a list of available items (nova items-list)
+    Return information about a server
+
+    name
+        Server Name
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' nova.item_list
+        salt '*' nova.server_by_name myserver profile=openstack
     '''
-    nt_ks = _auth()
-    ret = []
-    for item in nt_ks.items.list():
-        ret.append(item.__dict__)
-        #ret[item.name] = {
-        #        'name': item.name,
-        #    }
-    return ret
+    conn = _auth(profile)
+    return conn.server_by_name(name)
+
 
 #The following is a list of functions that need to be incorporated in the
 #nova module. This list should be updated as functions are added.
@@ -450,12 +692,10 @@ def _item_list():
 #                    Update the metadata associated with the aggregate.
 #aggregate-update    Update the aggregate's name and optionally
 #                    availability zone.
-#boot                Boot a new server.
 #cloudpipe-create    Create a cloudpipe instance for the given project
 #cloudpipe-list      Print a list of all cloudpipe instances.
 #console-log         Get console log output of a server.
 #credentials         Show user credentials returned from auth
-#delete              Immediately shut down and delete a server.
 #describe-resource   Show details about a resource
 #diagnostics         Retrieve server diagnostics.
 #dns-create          Create a DNS entry for domain, name and ip.
@@ -482,7 +722,6 @@ def _item_list():
 #                    server.
 #image-delete        Delete an image.
 #live-migration      Migrates a running instance to a new machine.
-#lock                Lock a server.
 #meta                Set or Delete metadata on a server.
 #migrate             Migrate a server.
 #pause               Pause a server.
@@ -497,7 +736,6 @@ def _item_list():
 #resize-confirm      Confirm a previous resize.
 #resize-revert       Revert a previous resize (and return to the previous
 #                    VM).
-#resume              Resume a server.
 #root-password       Change the root password for a server.
 #secgroup-add-group-rule
 #                    Add a source group rule to a security group.
@@ -509,17 +747,11 @@ def _item_list():
 #secgroup-list-rules
 #                    List rules for a security group.
 #ssh                 SSH into a server.
-#suspend             Suspend a server.
 #unlock              Unlock a server.
 #unpause             Unpause a server.
 #unrescue            Unrescue a server.
 #usage-list          List usage data for all tenants
-#volume-attach       Attach a volume to a server.
-#volume-create       Add a new volume.
-#volume-delete       Remove a volume.
-#volume-detach       Detach a volume from a server.
 #volume-list         List all the volumes.
-#volume-show         Show details about a volume.
 #volume-snapshot-create
 #                    Add a new snapshot.
 #volume-snapshot-delete

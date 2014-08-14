@@ -1,36 +1,33 @@
+# -*- coding: utf-8 -*-
+
 # Import python libs
 import json
+import pprint
 
 # Import Salt Testing libs
 from salttesting import skipIf, TestCase
 from salttesting.helpers import ensure_in_syspath
+from salttesting.mock import NO_MOCK, NO_MOCK_REASON, MagicMock
 ensure_in_syspath('../../')
 
 # Import third party libs
 import yaml
 
-try:
-    from mock import MagicMock, patch
-    has_mock = True
-except ImportError:
-    has_mock = False
+# Import salt libs
+import salt.states.file as filestate
 
-if has_mock:
-    import salt.states.file as filestate
-    filestate.__salt__ = {
-        'file.manage_file': False
-    }
-    filestate.__opts__ = {'test': False}
+filestate.__env__ = 'base'
+filestate.__salt__ = {'file.manage_file': False}
+filestate.__opts__ = {'test': False}
 
 
-@skipIf(has_mock is False, 'mock python module is unavailable')
+@skipIf(NO_MOCK, NO_MOCK_REASON)
 class TestFileState(TestCase):
 
     def test_serialize(self):
         def returner(contents, *args, **kwargs):
             returner.returned = contents
         returner.returned = None
-
 
         filestate.__salt__ = {
             'file.manage_file': returner
@@ -44,13 +41,16 @@ class TestFileState(TestCase):
         }
 
         filestate.serialize('/tmp', dataset)
-        self.assertEquals(yaml.load(returner.returned), dataset)
+        self.assertEqual(yaml.load(returner.returned), dataset)
 
         filestate.serialize('/tmp', dataset, formatter="yaml")
-        self.assertEquals(yaml.load(returner.returned), dataset)
+        self.assertEqual(yaml.load(returner.returned), dataset)
 
         filestate.serialize('/tmp', dataset, formatter="json")
-        self.assertEquals(json.loads(returner.returned), dataset)
+        self.assertEqual(json.loads(returner.returned), dataset)
+
+        filestate.serialize('/tmp', dataset, formatter="python")
+        self.assertEqual(returner.returned, pprint.pformat(dataset))
 
     def test_contents_and_contents_pillar(self):
         def returner(contents, *args, **kwargs):
@@ -65,7 +65,7 @@ class TestFileState(TestCase):
         filestate.__salt__['config.manage_mode'] = manage_mode_mock
 
         ret = filestate.managed('/tmp/foo', contents='hi', contents_pillar='foo:bar')
-        self.assertEquals(False, ret['result'])
+        self.assertEqual(False, ret['result'])
 
     def test_contents_pillar_adds_newline(self):
         # make sure the newline
@@ -81,9 +81,7 @@ class TestFileState(TestCase):
         self.run_contents_pillar(pillar_value, expected=pillar_value)
 
     def run_contents_pillar(self, pillar_value, expected):
-        def returner(contents, *args, **kwargs):
-            returner.returned = (contents, args, kwargs)
-        returner.returned = None
+        returner = MagicMock(return_value=None)
 
         filestate.__salt__ = {
             'file.manage_file': returner
@@ -107,10 +105,10 @@ class TestFileState(TestCase):
         pillar_mock.assert_called_once_with(pillar_path)
 
         # make sure no errors are returned
-        self.assertEquals(None, ret)
+        self.assertEqual(None, ret)
 
         # make sure the value is correct
-        self.assertEquals(expected, returner.returned[1][-1])
+        self.assertEqual(expected, returner.call_args[0][-3])
 
 if __name__ == '__main__':
     from integration import run_tests

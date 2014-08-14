@@ -1,9 +1,7 @@
+# -*- coding: utf-8 -*-
 '''
 Module for gathering and managing network information
 '''
-
-# Import python libs
-import re
 
 # Import salt libs
 import salt.utils
@@ -16,9 +14,12 @@ except ImportError:
 
 # Import 3rd party libraries
 try:
-    import wmi
+    import wmi  # pylint: disable=W0611
 except ImportError:
     HAS_DEPENDENCIES = False
+
+# Define the module's virtual name
+__virtualname__ = 'network'
 
 
 def __virtual__():
@@ -26,7 +27,7 @@ def __virtual__():
     Only works on Windows systems
     '''
     if salt.utils.is_windows() and HAS_DEPENDENCIES is True:
-        return 'network'
+        return __virtualname__
     return False
 
 
@@ -34,7 +35,9 @@ def ping(host):
     '''
     Performs a ping to a host
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.ping archlinux.org
     '''
@@ -46,12 +49,14 @@ def netstat():
     '''
     Return information on open ports and states
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.netstat
     '''
     ret = []
-    cmd = 'netstat -na'
+    cmd = 'netstat -nao'
     lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         comps = line.split()
@@ -60,13 +65,15 @@ def netstat():
                 'local-address': comps[1],
                 'proto': comps[0],
                 'remote-address': comps[2],
-                'state': comps[3]})
+                'state': comps[3],
+                'program': comps[4]})
         if line.startswith('  UDP'):
             ret.append({
                 'local-address': comps[1],
                 'proto': comps[0],
                 'remote-address': comps[2],
-                'state': None})
+                'state': None,
+                'program': comps[3]})
     return ret
 
 
@@ -74,7 +81,9 @@ def traceroute(host):
     '''
     Performs a traceroute to a 3rd party host
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.traceroute archlinux.org
     '''
@@ -82,7 +91,7 @@ def traceroute(host):
     cmd = 'tracert {0}'.format(salt.utils.network.sanitize_host(host))
     lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
-        if not ' ' in line:
+        if ' ' not in line:
             continue
         if line.startswith('Trac'):
             continue
@@ -126,7 +135,9 @@ def nslookup(host):
     '''
     Query DNS for information about a domain or ip address
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.nslookup archlinux.org
     '''
@@ -159,7 +170,9 @@ def dig(host):
 
     Note: dig must be installed on the Windows minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.dig archlinux.org
     '''
@@ -167,11 +180,32 @@ def dig(host):
     return __salt__['cmd.run'](cmd)
 
 
+def interfaces_names():
+    '''
+    Return a list of all the interfaces names
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' network.interfaces_names
+    '''
+
+    ret = []
+    with salt.utils.winapi.Com():
+        c = wmi.WMI()
+        for iface in c.Win32_NetworkAdapter(NetEnabled=True):
+            ret.append(iface.NetConnectionID)
+    return ret
+
+
 def interfaces():
     '''
     Return a dictionary of information about all the interfaces on the minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.interfaces
     '''
@@ -182,7 +216,9 @@ def hw_addr(iface):
     '''
     Return the hardware address (a.k.a. MAC address) for a given interface
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.hw_addr 'Wireless Connection #1'
     '''
@@ -196,7 +232,9 @@ def subnets():
     '''
     Returns a list of subnets to which the host belongs
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.subnets
     '''
@@ -207,7 +245,9 @@ def in_subnet(cidr):
     '''
     Returns True if host is within specified subnet, otherwise False
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.in_subnet 10.0.0.0/16
     '''
@@ -220,7 +260,9 @@ def ip_addrs(interface=None, include_loopback=False):
     ignored, unless 'include_loopback=True' is indicated. If 'interface' is
     provided, then only IP addresses from that interface will be returned.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.ip_addrs
     '''
@@ -236,7 +278,9 @@ def ip_addrs6(interface=None, include_loopback=False):
     unless 'include_loopback=True' is indicated. If 'interface' is provided,
     then only IP addresses from that interface will be returned.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' network.ip_addrs6
     '''

@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     tests.integration.modules.event
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2012-2013 by the SaltStack Team, see AUTHORS for more details
-    :license: Apache 2.0, see LICENSE for more details.
 '''
 
 # Import python libs
@@ -60,7 +59,7 @@ class EventModuleTest(integration.ModuleCase):
         events = Queue()
 
         def get_event(events):
-            me = event.MinionEvent(**self.minion_opts)
+            me = event.MinionEvent(self.minion_opts)
             events.put_nowait(
                 me.get_event(wait=10, tag='salttest', full=False)
             )
@@ -89,7 +88,7 @@ class EventModuleTest(integration.ModuleCase):
         events = Queue()
 
         def get_event(events):
-            me = event.MinionEvent(**self.sub_minion_opts)
+            me = event.MinionEvent(self.sub_minion_opts)
             events.put_nowait(
                 me.get_event(wait=10, tag='salttest', full=False)
             )

@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 # winservice.py
 
 # Import python libs
+from __future__ import print_function
 from os.path import splitext, abspath
 from sys import modules
 

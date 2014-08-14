@@ -1,4 +1,4 @@
-build
+/build
 *.py[co]
 pkg/arch/*.tar.xz
 *.swp
@@ -9,6 +9,7 @@ MANIFEST
 *#
 *.wpr
 *.wpu
+*.DS_Store
 
 # virtualenv
 # - ignores directories of a virtualenv when you create it right on
@@ -32,9 +33,30 @@ tests/integration/tmp/
 .coverage
 coverage.xml
 htmlcov/
+
+# IDE files
 /.project
 /.pydevproject
 /.idea
+/.ropeproject
+/*.iml
+*.sublime-project
+*.sublime-workspace
 
 # ignore ctags file
 tags
+
+# ignore Vagrant file
+Vagrantfile
+.vagrant
+
+# Compiled translation files should not be VCS'ed
+# locale/zh_CN/LC_MESSAGES/topics/virt/nic.mo
+*.mo
+.doctrees
+
+# Allow a user to set their own _version.py for testing
+_version.py
+
+# Ignore grains file written out during tests
+tests/integration/files/conf/grains

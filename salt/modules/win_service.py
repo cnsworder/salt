@@ -1,10 +1,15 @@
+# -*- coding: utf-8 -*-
 '''
 Windows Service module.
 '''
 
 # Import python libs
-import time
 import salt.utils
+
+# Define the module's virtual name
+__virtualname__ = 'service'
+
+BUFFSIZE = 5000
 
 
 def __virtual__():
@@ -12,75 +17,135 @@ def __virtual__():
     Only works on Windows systems
     '''
     if salt.utils.is_windows():
-        return 'service'
+        return __virtualname__
     return False
+
+
+def has_powershell():
+    '''
+    Confirm if Powershell is available
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.has_powershell
+    '''
+    return 'powershell' in __salt__['cmd.run']('where powershell')
 
 
 def get_enabled():
     '''
     Return the enabled services
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.get_enabled
     '''
-    ret = set()
-    services = []
-    cmd = 'sc query type= service state= all'
-    lines = __salt__['cmd.run'](cmd).splitlines()
-    for line in lines:
-        if 'SERVICE_NAME:' in line:
-            comps = line.split(':', 1)
-            if not len(comps) > 1:
-                continue
-            services.append(comps[1].strip())
-    for service in services:
-        cmd2 = 'sc qc "{0}"'.format(service)
-        lines = __salt__['cmd.run'](cmd2).splitlines()
+
+    if has_powershell():
+        cmd = 'Get-WmiObject win32_service | where {$_.startmode -eq "Auto"} | select-object name'
+        lines = __salt__['cmd.run'](cmd, shell='POWERSHELL').splitlines()
+        return sorted([line.strip() for line in lines[3:]])
+    else:
+        ret = set()
+        services = []
+        cmd = 'sc query type= service state= all bufsize= {0}'.format(BUFFSIZE)
+        lines = __salt__['cmd.run'](cmd).splitlines()
         for line in lines:
-            if 'AUTO_START' in line:
-                ret.add(service)
-    return sorted(ret)
+            if 'SERVICE_NAME:' in line:
+                comps = line.split(':', 1)
+                if not len(comps) > 1:
+                    continue
+                services.append(comps[1].strip())
+        for service in services:
+            cmd2 = 'sc qc "{0}" {1}'.format(service, BUFFSIZE)
+            lines = __salt__['cmd.run'](cmd2).splitlines()
+            for line in lines:
+                if 'AUTO_START' in line:
+                    ret.add(service)
+        return sorted(ret)
 
 
 def get_disabled():
     '''
     Return the disabled services
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.get_disabled
     '''
-    ret = set()
-    services = []
-    cmd = 'sc query type= service state= all'
-    lines = __salt__['cmd.run'](cmd).splitlines()
-    for line in lines:
-        if 'SERVICE_NAME:' in line:
-            comps = line.split(':', 1)
-            if not len(comps) > 1:
-                continue
-            services.append(comps[1].strip())
-    for service in services:
-        cmd2 = 'sc qc "{0}"'.format(service)
-        lines = __salt__['cmd.run'](cmd2).splitlines()
+    if has_powershell():
+        cmd = 'Get-WmiObject win32_service | where {$_.startmode -ne "Auto"} | select-object name'
+        lines = __salt__['cmd.run'](cmd, shell='POWERSHELL').splitlines()
+        return sorted([line.strip() for line in lines[3:]])
+    else:
+        ret = set()
+        services = []
+        cmd = 'sc query type= service state= all bufsize= {0}'.format(BUFFSIZE)
+        lines = __salt__['cmd.run'](cmd).splitlines()
         for line in lines:
-            if 'DEMAND_START' in line:
-                ret.add(service)
-            elif  'DISABLED' in line:
-                ret.add(service)
-    return sorted(ret)
+            if 'SERVICE_NAME:' in line:
+                comps = line.split(':', 1)
+                if not len(comps) > 1:
+                    continue
+                services.append(comps[1].strip())
+        for service in services:
+            cmd2 = 'sc qc "{0}" {1}'.format(service, BUFFSIZE)
+            lines = __salt__['cmd.run'](cmd2).splitlines()
+            for line in lines:
+                if 'DEMAND_START' in line:
+                    ret.add(service)
+                elif 'DISABLED' in line:
+                    ret.add(service)
+        return sorted(ret)
+
+
+def available(name):
+    '''
+    Returns ``True`` if the specified service is available, otherwise returns
+    ``False``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.available <service name>
+    '''
+    return name in get_all()
+
+
+def missing(name):
+    '''
+    The inverse of service.available.
+    Returns ``True`` if the specified service is not available, otherwise returns
+    ``False``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.missing <service name>
+    '''
+    return name not in get_all()
 
 
 def get_all():
     '''
     Return all installed services
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.get_all
     '''
     return sorted(get_enabled() + get_disabled())
+
 
 def get_service_name(*args):
     '''
@@ -95,16 +160,17 @@ def get_service_name(*args):
 
     If arguments are passed, create a dict of Display Names and Service Names
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.get_service_name
-
         salt '*' service.get_service_name 'Google Update Service (gupdate)' 'DHCP Client'
     '''
     ret = {}
     services = []
     display_names = []
-    cmd = 'sc query type= service state= all'
+    cmd = 'sc query type= service state= all bufsize= {0}'.format(BUFFSIZE)
     lines = __salt__['cmd.run'](cmd).splitlines()
     for line in lines:
         if 'SERVICE_NAME:' in line:
@@ -128,15 +194,18 @@ def get_service_name(*args):
             ret[arg] = service_dict[arg]
     return ret
 
+
 def start(name):
     '''
     Start the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.start <service name>
     '''
-    cmd = 'sc start "{0}"'.format(name)
+    cmd = 'net start "{0}"'.format(name)
     return not __salt__['cmd.retcode'](cmd)
 
 
@@ -144,11 +213,13 @@ def stop(name):
     '''
     Stop the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.stop <service name>
     '''
-    cmd = 'sc stop "{0}"'.format(name)
+    cmd = 'net stop "{0}"'.format(name)
     return not __salt__['cmd.retcode'](cmd)
 
 
@@ -156,21 +227,17 @@ def restart(name):
     '''
     Restart the named service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.restart <service name>
     '''
-    stopcmd = 'sc stop "{0}"'.format(name)
-    __salt__['cmd.run'](stopcmd)
-    servicestate = status(name)
-    while True:
-        servicestate = status(name)
-        if servicestate == '':
-            break
-        else:
-            time.sleep(2)
-    startcmd = 'sc start "{0}"'.format(name)
-    return not __salt__['cmd.retcode'](startcmd)
+    if has_powershell():
+        cmd = 'Restart-Service {0}'.format(name)
+        return not __salt__['cmd.retcode'](cmd, shell='powershell')
+    stop(name)
+    return start(name)
 
 
 def status(name, sig=None):
@@ -179,25 +246,29 @@ def status(name, sig=None):
     service is running or not, pass a signature to use to find the service via
     ps
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.status <service name> [service signature]
     '''
-    cmd = 'sc query "{0}"'.format(name)
+    cmd = 'sc query "{0}" {1}'.format(name, BUFFSIZE)
     statuses = __salt__['cmd.run'](cmd).splitlines()
     for line in statuses:
         if 'RUNNING' in line:
-            return getsid(name)
-        elif 'PENDING' in line:
-            return getsid(name)
-    return ''
+            return True
+        elif 'STOP_PENDING' in line:
+            return True
+    return False
 
 
 def getsid(name):
     '''
     Return the sid for this windows service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.getsid <service name>
     '''
@@ -216,7 +287,9 @@ def enable(name, **kwargs):
     '''
     Enable the named service to start at boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.enable <service name>
     '''
@@ -228,7 +301,9 @@ def disable(name, **kwargs):
     '''
     Disable the named service to start at boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.disable <service name>
     '''
@@ -240,7 +315,9 @@ def enabled(name):
     '''
     Check to see if the named service is enabled to start on boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.enabled <service name>
     '''
@@ -251,7 +328,9 @@ def disabled(name):
     '''
     Check to see if the named service is disabled to start on boot
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.disabled <service name>
     '''

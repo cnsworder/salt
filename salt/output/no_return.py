@@ -1,8 +1,21 @@
+# -*- coding: utf-8 -*-
 '''
 Display output for minions that did not return
+==============================================
+
+This outputter is used to display notices about which minions failed to return
+when a salt function is run with ``-v`` or ``--verbose``. It should not be
+called directly from the CLI.
+
+Example output::
+
+    virtucentos:
+        Minion did not return
 '''
 
+# Import salt libs
 import salt.utils
+
 
 class NestDisplay(object):
     '''
@@ -35,6 +48,7 @@ class NestDisplay(object):
                         self.colors['ENDC'])
                 out = self.display(val, indent + 4, '', out)
         return out
+
 
 def output(ret):
     '''

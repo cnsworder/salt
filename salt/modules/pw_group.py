@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Manage groups on FreeBSD
 '''
@@ -17,12 +18,15 @@ try:
 except ImportError:
     pass
 
+# Define the module's virtual name
+__virtualname__ = 'group'
+
 
 def __virtual__():
     '''
     Set the user module if the kernel is Linux
     '''
-    return 'group' if __grains__['kernel'] == 'FreeBSD' else False
+    return __virtualname__ if __grains__['kernel'] == 'FreeBSD' else False
 
 
 def add(name, gid=None, **kwargs):
@@ -35,6 +39,7 @@ def add(name, gid=None, **kwargs):
 
         salt '*' group.add foo 3456
     '''
+    kwargs = salt.utils.clean_kwargs(**kwargs)
     if salt.utils.is_true(kwargs.pop('system', False)):
         log.warning('pw_group module does not support the \'system\' argument')
     if kwargs:

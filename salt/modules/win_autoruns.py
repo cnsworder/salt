@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for listing programs that automatically run on startup
 (very alpha...not tested on anything but my Win 7x64)
@@ -15,6 +16,9 @@ __func_alias__ = {
     'list_': 'list'
 }
 
+# Define the module's virtual name
+__virtualname__ = 'autoruns'
+
 
 def __virtual__():
     '''
@@ -22,7 +26,7 @@ def __virtual__():
     '''
 
     if salt.utils.is_windows():
-        return 'autoruns'
+        return __virtualname__
     return False
 
 
@@ -30,7 +34,9 @@ def list_():
     '''
     Get a list of automatically running programs
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' autoruns.list
     '''

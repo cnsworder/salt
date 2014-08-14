@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Manage ruby installations with rbenv.
 
@@ -18,6 +19,7 @@ __func_alias__ = {
 
 __opts__ = {
     'rbenv.root': None,
+    'rbenv.build_env': None,
 }
 
 
@@ -86,7 +88,7 @@ def _update_rbenv(path, runas=None):
         return False
 
     return 0 == __salt__['cmd.retcode'](
-        'git pull --git-dir {0}'.format(path), runas=runas)
+        'cd {0} && git pull'.format(path), runas=runas)
 
 
 def _update_ruby_build(path, runas=None):
@@ -95,43 +97,47 @@ def _update_ruby_build(path, runas=None):
         return False
 
     return 0 == __salt__['cmd.retcode'](
-        'git pull --git-dir {0}'.format(path), runas=runas)
+        'cd {0} && git pull'.format(path), runas=runas)
 
 
 def install(runas=None, path=None):
     '''
     Install Rbenv systemwide
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.install
     '''
-
     path = path or _rbenv_path(runas)
     path = os.path.expanduser(path)
-    return (_install_rbenv(path, runas) and _install_ruby_build(path, runas))
+    return _install_rbenv(path, runas) and _install_ruby_build(path, runas)
 
 
 def update(runas=None, path=None):
     '''
     Updates the current versions of Rbenv and Ruby-Build
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.update
     '''
-
     path = path or _rbenv_path(runas)
     path = os.path.expanduser(path)
 
-    return (_update_rbenv(path, runas) and _update_ruby_build(path, runas))
+    return _update_rbenv(path, runas) and _update_ruby_build(path, runas)
 
 
 def is_installed(runas=None):
     '''
     Check if Rbenv is installed.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.is_installed
     '''
@@ -146,20 +152,40 @@ def install_ruby(ruby, runas=None):
         The version of Ruby to install, should match one of the
         versions listed by rbenv.list
 
-    CLI Example::
+    Additional environment variables can be configured in pillar /
+    grains / master:
+
+    .. code-block:: yaml
+
+        rbenv:
+          build_env: 'CONFIGURE_OPTS="--no-tcmalloc" CFLAGS="-fno-tree-dce"'
+
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.install_ruby 2.0.0-p0
     '''
-
     ruby = re.sub(r'^ruby-', '', ruby)
 
     env = None
+    env_list = []
+
     if __grains__['os'] in ('FreeBSD', 'NetBSD', 'OpenBSD'):
-        env = 'MAKE=gmake'
+        env_list.append('MAKE=gmake')
+
+    if __salt__['config.get']('rbenv:build_env'):
+        env_list.append(__salt__['config.get']('rbenv:build_env'))
+    elif __salt__['config.option']('rbenv.build_env'):
+        env_list.append(__salt__['config.option']('rbenv.build_env'))
+
+    if env_list:
+        env = ' '.join(env_list)
 
     ret = {}
     ret = _rbenv_exec('install', ruby, env=env, runas=runas, ret=ret)
     if ret['retcode'] == 0:
+        rehash(runas=runas)
         return ret['stderr']
     else:
         # Cleanup the failed installation so it doesn't list as installed
@@ -172,14 +198,15 @@ def uninstall_ruby(ruby, runas=None):
     Uninstall a ruby implementation.
 
     ruby
-        The version of ruby to uninstall. Should match one of
-        the versions listed by rbenv.versions
+        The version of ruby to uninstall. Should match one of the versions
+        listed by :mod:`rbenv.versions <salt.modules.rbenv.versions>`
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.uninstall_ruby 2.0.0-p0
     '''
-
     ruby = re.sub(r'^ruby-', '', ruby)
 
     args = '--force {0}'.format(ruby)
@@ -191,11 +218,12 @@ def versions(runas=None):
     '''
     List the installed versions of ruby.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.versions
     '''
-
     ret = _rbenv_exec('versions', '--bare', runas=runas)
     return [] if ret is False else ret.splitlines()
 
@@ -205,18 +233,17 @@ def default(ruby=None, runas=None):
     Returns or sets the currently defined default ruby.
 
     ruby=None
-        The version to set as the default. Should match one of
-        the versions listed by rbenv.versions.
-        Leave blank to return the current default.
+        The version to set as the default. Should match one of the versions
+        listed by :mod:`rbenv.versions <salt.modules.rbenv.versions>`. Leave
+        blank to return the current default.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.default
-        # 2.0.0-p0
-
         salt '*' rbenv.default 2.0.0-p0
     '''
-
     if ruby:
         _rbenv_exec('global', ruby, runas=runas)
         return True
@@ -229,11 +256,12 @@ def list_(runas=None):
     '''
     List the installable versions of ruby.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' rbenv.list
     '''
-
     ret = []
     output = _rbenv_exec('install', '--list', runas=runas)
     if output:
@@ -242,3 +270,60 @@ def list_(runas=None):
                 continue
             ret.append(line.strip())
     return ret
+
+
+def rehash(runas=None):
+    '''
+    Run rbenv rehash to update the installed shims.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' rbenv.rehash
+    '''
+    _rbenv_exec('rehash', runas=runas)
+    return True
+
+
+def do(cmdline=None, runas=None):
+    '''
+    Execute a ruby command with rbenv's shims from the user or the system.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' rbenv.do 'gem list bundler'
+        salt '*' rbenv.do 'gem list bundler' deploy
+    '''
+    path = _rbenv_path(runas)
+    result = __salt__['cmd.run_all'](
+        'env PATH={0}/shims:$PATH {1}'.format(path, cmdline),
+        runas=runas
+    )
+
+    if result['retcode'] == 0:
+        rehash(runas=runas)
+        return result['stdout']
+    else:
+        return False
+
+
+def do_with_ruby(ruby, cmdline, runas=None):
+    '''
+    Execute a ruby command with rbenv's shims using a specific ruby version.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' rbenv.do_with_ruby 2.0.0-p0 'gem list bundler'
+        salt '*' rbenv.do_with_ruby 2.0.0-p0 'gem list bundler' deploy
+    '''
+    if ruby:
+        cmd = 'RBENV_VERSION={0} {1}'.format(ruby, cmdline)
+    else:
+        cmd = cmdline
+
+    return do(cmd, runas=runas)

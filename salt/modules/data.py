@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Manage a local persistent data structure that can hold any arbitrary data
 specific to the minion
@@ -25,7 +26,7 @@ def clear():
     '''
     try:
         os.remove(os.path.join(__opts__['cachedir'], 'datastore'))
-    except IOError:
+    except (IOError, OSError):
         pass
     return True
 
@@ -44,7 +45,7 @@ def load():
 
     try:
         datastore_path = os.path.join(__opts__['cachedir'], 'datastore')
-        fn_ = salt.utils.fopen(datastore_path, "r")
+        fn_ = salt.utils.fopen(datastore_path, 'rb')
         return serial.load(fn_)
     except (IOError, OSError):
         return {}
@@ -68,7 +69,7 @@ def dump(new_data):
 
     try:
         datastore_path = os.path.join(__opts__['cachedir'], 'datastore')
-        with salt.utils.fopen(datastore_path, "w") as fn_:
+        with salt.utils.fopen(datastore_path, 'w+b') as fn_:
             serial = salt.payload.Serial(__opts__)
             serial.dump(new_data, fn_)
 
@@ -105,7 +106,8 @@ def getval(key):
         salt '*' data.getval <key>
     '''
     store = load()
-    return store[key]
+    if key in store:
+        return store[key]
 
 
 def getvals(*keys):

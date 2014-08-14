@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 This module interacts with an ISC DHCP Server via OMAPI.
 server_ip and server_port params may be set in the minion
@@ -77,9 +78,9 @@ def add_host(mac, name=None, ip=None, ddns=False, group=None,
     if group:
         msg.obj.append(('group', group))
     if supersede_host:
-        statements += 'option host-name {0}; '.format(name)
+        statements += 'option host-name "{0}"; '.format(name)
     if ddns and name:
-        statements += 'ddns-hostname {0}; '.format(name)
+        statements += 'ddns-hostname "{0}"; '.format(name)
     if statements:
         msg.obj.append(('statements', statements))
     response = o.query_server(msg)

@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 '''
 tests for user state
 user absent
@@ -11,7 +13,11 @@ import grp
 
 # Import Salt Testing libs
 from salttesting import skipIf
-from salttesting.helpers import destructiveTest, ensure_in_syspath
+from salttesting.helpers import (
+    destructiveTest,
+    ensure_in_syspath,
+    requires_system_grains
+)
 ensure_in_syspath('../../')
 
 # Import salt libs
@@ -70,7 +76,8 @@ class UserTest(integration.ModuleCase,
 
     @destructiveTest
     @skipIf(os.geteuid() != 0, 'you must be root to run this test')
-    def test_user_present_gid_from_name_default(self):
+    @requires_system_grains
+    def test_user_present_gid_from_name_default(self, grains=None):
         '''
         This is a DESTRUCTIVE TEST. It creates a new user on the on the minion.
         This is an integration test. Not all systems will automatically create
@@ -87,7 +94,10 @@ class UserTest(integration.ModuleCase,
         group_name = grp.getgrgid(ret['gid']).gr_name
 
         self.assertTrue(os.path.isdir('/var/lib/salt_test'))
-        self.assertEqual(group_name, 'salt_test')
+        if grains['os_family'] in ('Suse',):
+            self.assertEqual(group_name, 'users')
+        else:
+            self.assertEqual(group_name, 'salt_test')
 
         ret = self.run_state('user.absent', name='salt_test')
         self.assertSaltTrueReturn(ret)
@@ -115,6 +125,25 @@ class UserTest(integration.ModuleCase,
         ret = self.run_state('user.absent', name='salt_test')
         self.assertSaltTrueReturn(ret)
         ret = self.run_state('group.absent', name='salt_test')
+        self.assertSaltTrueReturn(ret)
+
+    @destructiveTest
+    @skipIf(os.geteuid() != 0, 'you must be root to run this test')
+    def test_user_present_gecos(self):
+        '''
+        This is a DESTRUCTIVE TEST it creates a new user on the on the minion.
+
+        It ensures that numeric GECOS data will be properly coerced to strings,
+        otherwise the state will fail because the GECOS fields are written as
+        strings (and show up in the user.info output as such). Thus the
+        comparison will fail, since '12345' != 12345.
+        '''
+        ret = self.run_state(
+            'user.present', name='salt_test', fullname=12345, roomnumber=123,
+            workphone=1234567890, homephone=1234567890
+        )
+        self.assertSaltTrueReturn(ret)
+        ret = self.run_state('user.absent', name='salt_test')
         self.assertSaltTrueReturn(ret)
 
 

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Provide authentication using OpenStack Keystone
 
@@ -27,10 +28,10 @@ def auth(username, password):
     try:
         keystone = client.Client(username=username, password=password,
                                  auth_url=get_auth_url())
+        return keystone.authenticate()
     except (AuthorizationFailure, Unauthorized):
         return False
-    else:
-        return keystone.authenticate()
+
 
 if __name__ == '__main__':
     __opts__ = {}

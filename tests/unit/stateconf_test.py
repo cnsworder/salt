@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Import Python libs
 from cStringIO import StringIO
 
@@ -18,13 +20,15 @@ REQUISITES = ['require', 'require_in', 'use', 'use_in', 'watch', 'watch_in']
 OPTS = salt.config.minion_config(None)
 OPTS['file_client'] = 'local'
 OPTS['file_roots'] = dict(base=['/'])
+FUNCS = {}
+FUNCS['config.get'] = lambda a, b: False
 
-RENDERERS = salt.loader.render(OPTS, {})
+RENDERERS = salt.loader.render(OPTS, FUNCS)
 
 
-def render_sls(content, sls='', env='base', argline='-G yaml . jinja', **kws):
+def render_sls(content, sls='', saltenv='base', argline='-G yaml . jinja', **kws):
     return RENDERERS['stateconf'](
-        StringIO(content), env=env, sls=sls,
+        StringIO(content), saltenv=saltenv, sls=sls,
         argline=argline,
         renderers=salt.loader.render(OPTS, {}),
         **kws
@@ -263,6 +267,17 @@ G:
             [i.itervalues().next() for i in goal_args[0]['require']],
             list('ABCDEFG')
         )
+
+    def test_slsdir(self):
+        result = render_sls('''
+formula/woot.sls:
+  cmd.run:
+    - name: echo {{ slspath }}
+    - cwd: /
+''', sls='formula.woot', argline='yaml . jinja')
+
+        r = result['formula/woot.sls']['cmd.run'][0]['name']
+        self.assertEqual(r, 'echo formula/woot')
 
 
 if __name__ == '__main__':

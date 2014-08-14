@@ -1,13 +1,56 @@
+# -*- coding: utf-8 -*-
 '''
-Execution of Salt modules from within states.
-=============================================
+Execution of Salt modules from within states
+============================================
 
-Individual module calls can be made via states. to call a single module
-function use the run function.
+These states allow individual execution module calls to be made via states. To
+call a single module function use a :mod:`module.run <salt.states.module.run>`
+state:
 
-One issue exists, since the name and fun arguments are present in the state
-call data structure and is present in many modules, this argument will need
-to be replaced in the sls data with the arguments m_name and m_fun.
+.. code-block:: yaml
+
+    mine.send:
+      module.run:
+        - func: network.interfaces
+
+Note that this example is probably unnecessary to use in practice, since the
+``mine_functions`` and ``mine_interval`` config parameters can be used to
+schedule updates for the mine (see :doc:`here </topics/mine/index>` for more
+info).
+
+It is sometimes desirable to trigger a function call after a state is executed,
+for this the :mod:`module.wait <salt.states.module.wait>` state can be used:
+
+.. code-block:: yaml
+
+    mine.send:
+      module.wait:
+        - func: network.interfaces
+        - watch:
+          - file: /etc/network/interfaces
+
+All arguments that the ``module`` state does not consume are passed through to
+the execution module function being executed:
+
+.. code-block:: yaml
+
+    fetch_out_of_band:
+      module.run:
+        - name: git.fetch
+        - cwd: /path/to/my/repo
+        - user: myuser
+        - opts: '--all'
+
+Due to how the state system works, if a module function accepts an
+argument called, ``name``, then ``m_name`` must be used to specify that
+argument, to avoid a collision with the ``name`` argument. For example:
+
+.. code-block:: yaml
+
+    disable_nfs:
+      module.run:
+        - name: service.disable
+        - m_name: nfs
 '''
 # Import python libs
 import datetime
@@ -27,14 +70,25 @@ def wait(name, **kwargs):
     ``**kwargs``
         Pass any arguments needed to execute the function
 
-    Note that this function actually does nothing -- however, if the `watch`
-    is satisfied, then `mod_watch` (defined at the bottom of this file) will be
-    run.  In this case, `mod_watch` is an alias for `run()`.
+    .. note::
+        Like the :mod:`cmd.run <salt.states.cmd.run>` state, this state will
+        return ``True`` but not actually execute, unless one of the following
+        two things happens:
+
+        1. The state has a :doc:`watch requisite </ref/states/requisites>`, and
+           the state which it is watching changes.
+
+        2. Another state has a :doc:`watch_in requisite
+           </ref/states/requisites>` which references this state, and the state
+           wth the ``watch_in`` changes.
     '''
     return {'name': name,
             'changes': {},
             'result': True,
             'comment': ''}
+
+# Alias module.watch to module.wait
+watch = wait
 
 
 def run(name, **kwargs):
@@ -138,9 +192,10 @@ def run(name, **kwargs):
             mret = __salt__[name](*args, **nkwargs)
         else:
             mret = __salt__[name](*args)
-    except Exception:
-        ret['comment'] = 'Module function {0} threw an exception'.format(name)
+    except Exception as e:
+        ret['comment'] = 'Module function {0} threw an exception. Exception: {1}'.format(name, e)
         ret['result'] = False
+        return ret
     else:
         if mret:
             ret['changes']['ret'] = mret

@@ -1,5 +1,8 @@
+# -*- coding: utf-8 -*-
 '''
 A module to wrap archive calls
+
+.. versionadded:: 2014.1.0
 '''
 
 # Import salt libs
@@ -20,13 +23,40 @@ def __virtual__():
     # If none of the above commands are in $PATH this module is a no-go
     if not any(_which(cmd) for cmd in commands):
         return False
-    return 'archive'
+    return True
 
 
 @decorators.which('tar')
-def tar(options, tarfile, sources, cwd=None, template=None):
+def tar(options, tarfile, sources=None, dest=None, cwd=None, template=None):
     '''
+    .. note::
+
+        This function has changed for version 0.17.0. In prior versions, the
+        ``cwd`` and ``template`` arguments must be specified, with the source
+        directories/files coming as a space-separated list at the end of the
+        command. Beginning with 0.17.0, ``sources`` must be a comma-separated
+        list, and the ``cwd`` and ``template`` arguments are optional.
+
     Uses the tar command to pack, unpack, etc tar files
+
+
+    options:
+        Options to pass to the ``tar`` binary.
+
+    tarfile:
+        The tar filename to pack/unpack.
+
+    sources:
+        Comma delimited list of files to **pack** into the tarfile.
+
+    dest:
+        The destination directory to **unpack** the tarfile to.
+
+    cwd:
+        The directory in which the tar command should be executed.
+
+    template:
+         Template engine name to render the command arguments before execution.
 
     CLI Example:
 
@@ -34,19 +64,32 @@ def tar(options, tarfile, sources, cwd=None, template=None):
 
         salt '*' archive.tar cjvf /tmp/tarfile.tar.bz2 /tmp/file_1,/tmp/file_2
 
-    The template arg can be set to 'jinja' or another supported template
-    engine to render the command arguments before execution.
-    For example:
+
+    The template arg can be set to ``jinja`` or another supported template
+    engine to render the command arguments before execution. For example:
 
     .. code-block:: bash
 
-        salt '*' archive.tar template=jinja cjvf /tmp/salt.tar.bz2 {{grains.saltpath}}
+        salt '*' archive.tar cjvf /tmp/salt.tar.bz2 {{grains.saltpath}} template=jinja
+
+
+    To unpack a tarfile, for example:
+
+    .. code-block:: bash
+
+        salt '*' archive.tar xf foo.tar dest=/target/directory
 
     '''
     if isinstance(sources, salt._compat.string_types):
         sources = [s.strip() for s in sources.split(',')]
 
-    cmd = 'tar -{0} {1} {2}'.format(options, tarfile, ' '.join(sources))
+    if dest:
+        options = 'C {0} -{1}'.format(dest, options)
+
+    cmd = 'tar -{0} {1}'.format(options, tarfile)
+    if sources:
+        cmd += ' {0}'.format(' '.join(sources))
+
     return __salt__['cmd.run'](cmd, cwd=cwd, template=template).splitlines()
 
 
@@ -128,9 +171,12 @@ def zip_(zipfile, sources, template=None):
 
 
 @decorators.which('unzip')
-def unzip(zipfile, dest, excludes=None, template=None):
+def unzip(zipfile, dest, excludes=None, template=None, options=None):
     '''
     Uses the unzip command to unpack zip files
+
+    options:
+        Options to pass to the ``unzip`` binary.
 
     CLI Example:
 
@@ -151,7 +197,11 @@ def unzip(zipfile, dest, excludes=None, template=None):
     if isinstance(excludes, salt._compat.string_types):
         excludes = [entry.strip() for entry in excludes.split(',')]
 
-    cmd = 'unzip {0} -d {1}'.format(zipfile, dest)
+    if options:
+        cmd = 'unzip -{0} {1} -d {2}'.format(options, zipfile, dest)
+    else:
+        cmd = 'unzip {0} -d {1}'.format(zipfile, dest)
+
     if excludes is not None:
         cmd += ' -x {0}'.format(' '.join(excludes))
     return __salt__['cmd.run'](cmd, template=template).splitlines()

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Return data to a mongodb server
 
@@ -17,6 +18,9 @@ to the minion config files::
 This mongo returner is being developed to replace the default mongodb returner
 in the future and should not be considered API stable yet.
 
+  To use the mongo returner, append '--return mongo' to the salt command. ex:
+
+    salt '*' test.ping --return mongo
 '''
 
 # Import python libs
@@ -29,14 +33,16 @@ try:
 except ImportError:
     HAS_PYMONGO = False
 
-
 log = logging.getLogger(__name__)
+
+# Define the module's virtual name
+__virtualname__ = 'mongo'
 
 
 def __virtual__():
     if not HAS_PYMONGO:
         return False
-    return 'mongo'
+    return __virtualname__
 
 
 def _remove_dots(src):

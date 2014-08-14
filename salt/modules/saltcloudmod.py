@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Control a salt cloud system
 '''
@@ -9,26 +10,33 @@ import json
 import salt.utils
 HAS_CLOUD = False
 try:
-    import saltcloud
+    import saltcloud  # pylint: disable=W0611
     HAS_CLOUD = True
 except ImportError:
     pass
+
+# Define the module's virtual name
+__virtualname__ = 'saltcloud'
+
 
 def __virtual__():
     '''
     Only load if salt cloud is installed
     '''
     if HAS_CLOUD:
-        return 'saltcloud'
+        return __virtualname__
     return False
+
 
 def create(name, profile):
     '''
     Create the named vm
 
-    CLI Example::
+    CLI Example:
 
-        saltcloud.create webserver rackspace_centos_512
+    .. code-block:: bash
+
+        salt <minion-id> saltcloud.create webserver rackspace_centos_512
     '''
     cmd = 'salt-cloud --out json -p {0} {1}'.format(profile, name)
     out = __salt__['cmd.run_stdout'](cmd)

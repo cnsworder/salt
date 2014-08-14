@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 The default service module, if not otherwise specified salt will fall back
 to this basic module
@@ -10,21 +11,9 @@ __func_alias__ = {
     'reload_': 'reload'
 }
 
-GRAINMAP = {
+_GRAINMAP = {
     'Arch': '/etc/rc.d',
-    'Arch ARM': '/etc/rc.d',
-    'Debian': '/etc/init.d',
-    'Fedora': '/etc/init.d',
-    'RedHat': '/etc/init.d',
-    'Ubuntu': '/etc/init.d',
-    'Gentoo': '/etc/init.d',
-    'CentOS': '/etc/init.d',
-    'CloudLinux': '/etc/init.d',
-    'Amazon': '/etc/init.d',
-    'SunOS': '/etc/init.d',
-    'SUSE  Enterprise Server': '/etc/init.d',
-    'openSUSE': '/etc/init.d',
-    'OEL': '/etc/init.d',
+    'Arch ARM': '/etc/rc.d'
 }
 
 
@@ -37,7 +26,7 @@ def __virtual__():
         'RedHat',
         'CentOS',
         'Amazon',
-        'Scientific',
+        'ScientificLinux',
         'CloudLinux',
         'Fedora',
         'Gentoo',
@@ -49,6 +38,8 @@ def __virtual__():
         'SUSE  Enterprise Server',
         'OEL',
         'Linaro',
+        'elementary OS',
+        'McAfee  OS Server'
     ))
     if __grains__.get('os', '') in disable:
         return False
@@ -56,7 +47,7 @@ def __virtual__():
     if __grains__['kernel'] != 'Linux':
         return False
     # Suse >=12.0 uses systemd
-    if __grains__.get('os', '') == 'openSUSE':
+    if __grains__.get('os_family', '') == 'Suse':
         try:
             if int(__grains__.get('osrelease', '').split('.')[0]) >= 12:
                 return False
@@ -69,12 +60,16 @@ def start(name):
     '''
     Start the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.start <service name>
     '''
-    cmd = os.path.join(GRAINMAP[__grains__['os']],
-            name + ' start')
+    cmd = os.path.join(
+        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
+        name
+    ) + ' start'
     return not __salt__['cmd.retcode'](cmd)
 
 
@@ -82,25 +77,33 @@ def stop(name):
     '''
     Stop the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.stop <service name>
     '''
-    cmd = os.path.join(GRAINMAP[__grains__['os']],
-            name + ' stop')
+    cmd = os.path.join(
+        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
+        name
+    ) + ' stop'
     return not __salt__['cmd.retcode'](cmd)
 
 
-def restart(name, **kwargs):
+def restart(name):
     '''
     Restart the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.restart <service name>
     '''
-    cmd = os.path.join(GRAINMAP[__grains__['os']],
-            name + ' restart')
+    cmd = os.path.join(
+        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
+        name
+    ) + ' restart'
     return not __salt__['cmd.retcode'](cmd)
 
 
@@ -110,7 +113,9 @@ def status(name, sig=None):
     service is running or not, pass a signature to use to find the service via
     ps
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.status <service name> [service signature]
     '''
@@ -121,34 +126,58 @@ def reload_(name):
     '''
     Restart the specified service
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.reload <service name>
     '''
-    cmd = os.path.join(GRAINMAP[__grains__['os']],
-            name + ' reload')
+    cmd = os.path.join(
+        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
+        name
+    ) + ' reload'
     return not __salt__['cmd.retcode'](cmd)
+
+
+def available(name):
+    '''
+    Returns ``True`` if the specified service is available, otherwise returns
+    ``False``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.available sshd
+    '''
+    return name in get_all()
+
+
+def missing(name):
+    '''
+    The inverse of service.available.
+    Returns ``True`` if the specified service is not available, otherwise returns
+    ``False``.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.missing sshd
+    '''
+    return name not in get_all()
 
 
 def get_all():
     '''
     Return a list of all available services
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' service.get_all
     '''
-    if not os.path.isdir(GRAINMAP[__grains__['os']]):
+    if not os.path.isdir(_GRAINMAP.get(__grains__.get('os'), '/etc/init.d')):
         return []
-    return sorted(os.listdir(GRAINMAP[__grains__['os']]))
-
-
-def available(name):
-    '''
-    Return if the specified service is available
-
-    CLI Example::
-
-        salt '*' service.available
-    '''
-    return name in get_all()
+    return sorted(os.listdir(_GRAINMAP.get(__grains__.get('os'), '/etc/init.d')))

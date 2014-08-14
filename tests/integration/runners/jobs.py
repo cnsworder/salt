@@ -1,8 +1,8 @@
+# -*- coding: utf-8 -*-
+
 '''
 Tests for the salt-run command
 '''
-# Import python libs
-import sys
 
 # Import Salt Testing libs
 from salttesting.helpers import ensure_in_syspath
@@ -22,7 +22,7 @@ class ManageTest(integration.ShellCase):
         '''
         ret = self.run_run_plus('jobs.active')
         self.assertEqual(ret['fun'], {})
-        self.assertEqual(ret['out'], ['{}'])
+        self.assertEqual(ret['out'], [])
 
     def test_lookup_jid(self):
         '''

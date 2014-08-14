@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Apache Solr Salt Module
 =======================
@@ -26,7 +27,7 @@ Override these in the minion config
 -----------------------------------
 
 solr.cores
-    A list of core names eg ['core1','core2'].
+    A list of core names e.g. ['core1','core2'].
     An empty list indicates non-multicore setup.
 solr.baseurl
     The root level URL to access solr via HTTP
@@ -62,6 +63,7 @@ verbose : True
 # Import python Libs
 import json
 import os
+import urllib2
 
 # Import salt libs
 import salt.utils
@@ -195,7 +197,7 @@ def _format_url(handler, host=None, core_name=None, extra=None):
         The name of the solr core if using cores. Leave this blank if you
         are not using cores or if you want to check all cores.
     extra : list<str> ([])
-        A list of name value pairs in string format. eg ['name=value']
+        A list of name value pairs in string format. e.g. ['name=value']
 
     Return: str
         Fully formatted URL (http://<host>:<port>/solr/<handler>?wt=json&<extra>)
@@ -221,6 +223,28 @@ def _format_url(handler, host=None, core_name=None, extra=None):
                     host, port, baseurl, core_name, handler, "&".join(extra))
 
 
+def _auth(url):
+    '''
+    Install an auth handler for urllib2
+    '''
+    user = __salt__['config.get']('solr.user', False)
+    password = __salt__['config.get']('solr.passwd', False)
+    realm = __salt__['config.get']('solr.auth_realm', 'Solr')
+
+    if user and password:
+        basic = urllib2.HTTPBasicAuthHandler()
+        basic.add_password(
+            realm=realm, uri=url, user=user, passwd=password
+        )
+        digest = urllib2.HTTPDigestAuthHandler()
+        digest.add_password(
+            realm=realm, uri=url, user=user, passwd=password
+        )
+        urllib2.install_opener(
+            urllib2.build_opener(basic, digest)
+        )
+
+
 def _http_request(url, request_timeout=None):
     '''
     PRIVATE METHOD
@@ -236,6 +260,7 @@ def _http_request(url, request_timeout=None):
 
          {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
     '''
+    _auth(url)
     try:
 
         request_timeout = __salt__['config.option']('solr.request_timeout')
@@ -264,7 +289,7 @@ def _replication_request(command, host=None, core_name=None, params=None):
         not using cores or if you want to check all cores.
     params : list<str> ([])
         Any additional parameters you want to send. Should be a lsit of
-        strings in name=value format. eg ['name=value']
+        strings in name=value format. e.g. ['name=value']
 
     Return: dict<str, obj>::
 
@@ -439,7 +464,9 @@ def lucene_version(core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.lucene_version
     '''
@@ -480,7 +507,9 @@ def version(core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.version
     '''
@@ -530,7 +559,9 @@ def optimize(host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.optimize music
     '''
@@ -572,7 +603,9 @@ def ping(host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.ping music
     '''
@@ -608,7 +641,9 @@ def is_replication_enabled(host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.is_replication_enabled music
     '''
@@ -684,7 +719,9 @@ def match_index_versions(host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.match_index_versions music
     '''
@@ -769,7 +806,9 @@ def replication_details(host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.replication_details music
     '''
@@ -811,7 +850,9 @@ def backup(host=None, core_name=None, append_core_to_path=False):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.backup music
     '''
@@ -867,7 +908,9 @@ def set_is_polling(polling, host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.set_is_polling False
     '''
@@ -914,7 +957,9 @@ def set_replication_enabled(status, host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.set_replication_enabled false, None, music
     '''
@@ -935,9 +980,9 @@ def set_replication_enabled(status, host=None, core_name=None):
         return ret
     else:
         if status:
-            return  _replication_request(cmd, host=host, core_name=core_name)
+            return _replication_request(cmd, host=host, core_name=core_name)
         else:
-            return  _replication_request(cmd, host=host, core_name=core_name)
+            return _replication_request(cmd, host=host, core_name=core_name)
 
 
 def signal(signal=None):
@@ -950,7 +995,9 @@ def signal(signal=None):
         The command to pass to the apache solr init valid values are 'start',
         'stop', and 'restart'
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.signal restart
     '''
@@ -984,9 +1031,13 @@ def reload_core(host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.reload_core None music
+
+    Return data is in the following format::
 
         {'success':bool, 'data':dict, 'errors':list, 'warnings':list}
     '''
@@ -1024,7 +1075,9 @@ def core_status(host=None, core_name=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.core_status None music
     '''
@@ -1069,7 +1122,9 @@ def reload_import_config(handler, host=None, core_name=None, verbose=False):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.reload_import_config dataimport None music {'clean':True}
     '''
@@ -1111,7 +1166,9 @@ def abort_import(handler, host=None, core_name=None, verbose=False):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.abort_import dataimport None music {'clean':True}
     '''
@@ -1154,7 +1211,9 @@ def full_import(handler, host=None, core_name=None, options=None, extra=None):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.full_import dataimport None music {'clean':True}
     '''
@@ -1203,13 +1262,15 @@ def delta_import(handler, host=None, core_name=None, options=None, extra=None):
         be merged with __opts__
 
     extra : dict ([])
-        Extra name value pairs to pass to the handler. eg ["name=value"]
+        Extra name value pairs to pass to the handler. e.g. ["name=value"]
 
     Return : dict<str,obj>::
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.delta_import dataimport None music {'clean':True}
     '''
@@ -1223,7 +1284,7 @@ def delta_import(handler, host=None, core_name=None, options=None, extra=None):
     if not resp['success']:
         return resp
     options = _merge_options(options)
-    #if we're nuking data, and we're multi-core disable replication for safty
+    #if we're nuking data, and we're multi-core disable replication for safety
     if options['clean'] and _check_for_cores():
         resp = set_replication_enabled(False, host=host, core_name=core_name)
         if not resp['success']:
@@ -1256,7 +1317,9 @@ def import_status(handler, host=None, core_name=None, verbose=False):
 
         {'success':boolean, 'data':dict, 'errors':list, 'warnings':list}
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' solr.import_status dataimport None music False
     '''

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 This module (mostly) uses the XenAPI to manage Xen virtual machines.
 
@@ -12,7 +13,7 @@ Useful documentation:
 
 . http://downloads.xen.org/Wiki/XenAPI/xenapi-1.0.6.pdf
 . http://docs.vmd.citrix.com/XenServer/6.0.0/1.0/en_gb/api/
-. https://github.com/xen-org/xen-api/tree/master/scripts/examples/python
+. https://github.com/xapi-project/xen-api/tree/master/scripts/examples/python
 . http://xenbits.xen.org/gitweb/?p=xen.git;a=tree;f=tools/python/xen/xm;hb=HEAD
 '''
 
@@ -32,11 +33,15 @@ except ImportError:
 from salt.exceptions import CommandExecutionError
 import salt.utils
 
+# Define the module's virtual name
+__virtualname__ = 'virt'
 
 # This module has only been tested on Debian GNU/Linux and NetBSD, it
 # probably needs more path appending for other distributions.
 # The path to append is the path to python Xen libraries, where resides
 # XenAPI.
+
+
 def _check_xenapi():
     if __grains__['os'] == 'Debian':
         debian_xen_version = '/usr/lib/xen-common/bin/xen-version'
@@ -50,14 +55,14 @@ def _check_xenapi():
     try:
         if HAS_IMPORTLIB:
             return importlib.import_module('xen.xm.XenAPI')
-        return __import__('xen.xm.XenAPI')
-    except ImportError:
+        return __import__('xen.xm.XenAPI').xm.XenAPI
+    except (ImportError, AttributeError):
         return False
 
 
 def __virtual__():
     if _check_xenapi() is not False:
-        return 'virt'
+        return __virtualname__
     return False
 
 
@@ -169,7 +174,9 @@ def list_vms():
     '''
     Return a list of virtual machine names on the minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.list_vms
     '''
@@ -191,7 +198,9 @@ def vm_info(vm_=None):
     If you pass a VM name in as an argument then it will return info
     for just the named VM, otherwise it will return all VMs.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.vm_info
     '''
@@ -232,7 +241,9 @@ def vm_state(vm_=None):
     If you pass a VM name in as an argument then it will return info
     for just the named VM, otherwise it will return all VMs.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.vm_state <vm name>
     '''
@@ -252,7 +263,9 @@ def node_info():
     '''
     Return a dict with information about this node
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.node_info
     '''
@@ -269,13 +282,13 @@ def node_info():
             cpu_speeds = [int(host_cpu_rec["speed"])
                           for host_cpu_it in host_cpu_rec
                           if "speed" in host_cpu_it]
-            if len(cpu_speeds) > 0:
+            if cpu_speeds:
                 return sum(cpu_speeds) / len(cpu_speeds)
             else:
                 return 0
 
         def getCpuFeatures():
-            if len(host_cpu_rec) > 0:
+            if host_cpu_rec:
                 return host_cpu_rec['features']
 
         def getFreeCpuCount():
@@ -335,7 +348,9 @@ def get_nics(vm_):
     '''
     Return info about the network interfaces of a named vm
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.get_nics <vm name>
     '''
@@ -360,7 +375,9 @@ def get_macs(vm_):
     '''
     Return a list off MAC addresses from the named vm
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.get_macs <vm name>
     '''
@@ -378,7 +395,9 @@ def get_disks(vm_):
     '''
     Return the disks of a named vm
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.get_disks <vm name>
     '''
@@ -409,7 +428,9 @@ def setmem(vm_, memory):
 
     Memory is to be specified in MB
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.setmem myvm 768
     '''
@@ -433,7 +454,9 @@ def setvcpus(vm_, vcpus):
 
     vcpus is an int representing the number to be assigned
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.setvcpus myvm 2
     '''
@@ -452,7 +475,9 @@ def vcpu_pin(vm_, vcpu, cpus):
     '''
     Set which CPUs a VCPU can use.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt 'foo' virt.vcpu_pin domU-id 2 1
         salt 'foo' virt.vcpu_pin domU-id 2 2-6
@@ -505,7 +530,9 @@ def freemem():
     Return an int representing the amount of memory that has not been given
     to virtual machines on this node
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.freemem
     '''
@@ -517,7 +544,9 @@ def freecpu():
     Return an int representing the number of unallocated cpus on this
     hypervisor
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.freecpu
     '''
@@ -528,7 +557,9 @@ def full_info():
     '''
     Return the node_info, vm_info and freemem
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.full_info
     '''
@@ -539,7 +570,9 @@ def shutdown(vm_):
     '''
     Send a soft shutdown signal to the named vm
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.shutdown <vm name>
     '''
@@ -558,7 +591,9 @@ def pause(vm_):
     '''
     Pause the named vm
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.pause <vm name>
     '''
@@ -577,7 +612,9 @@ def resume(vm_):
     '''
     Resume the named vm
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.resume <vm name>
     '''
@@ -601,7 +638,9 @@ def create(config_):
     '''
     Start a defined domain
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.create <path to Xen cfg file>
     '''
@@ -612,7 +651,9 @@ def start(config_):
     '''
     Alias for the obscurely named 'create' function
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.start <path to Xen cfg file>
     '''
@@ -623,7 +664,9 @@ def reboot(vm_):
     '''
     Reboot a domain via ACPI request
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.reboot <vm name>
     '''
@@ -642,7 +685,9 @@ def reset(vm_):
     '''
     Reset a VM by emulating the reset button on a physical machine
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.reset <vm name>
     '''
@@ -662,16 +707,24 @@ def migrate(vm_, target,
     '''
     Migrates the virtual machine to another hypervisor
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.migrate <vm name> <target hypervisor> [live] [port] [node] [ssl] [change_home_server]
 
     Optional values:
-        - live, use live migration
-        - port, use a specified port
-        - node, use specified NUMA node on target
-        - ssl, use ssl connection for migration
-        - change_home_server, change home server for managed domains
+
+    live
+        Use live migration
+    port
+        Use a specified port
+    node
+        Use specified NUMA node on target
+    ssl
+        use ssl connection for migration
+    change_home_server
+        change home server for managed domains
     '''
     with _get_xapi_session() as xapi:
         vm_uuid = _get_label_uuid(xapi, 'VM', vm_)
@@ -695,7 +748,9 @@ def destroy(vm_):
     Hard power down the virtual machine, this is equivalent to pulling the
     power
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.destroy <vm name>
     '''
@@ -714,7 +769,9 @@ def is_hyper():
     '''
     Returns a bool whether or not this node is a hypervisor of any kind
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.is_hyper
     '''
@@ -736,7 +793,9 @@ def is_hyper():
 def vm_cputime(vm_=None):
     '''
     Return cputime used by the vms on this hyper in a
-    list of dicts::
+    list of dicts:
+
+    .. code-block:: python
 
         [
             'your-vm': {
@@ -749,7 +808,9 @@ def vm_cputime(vm_=None):
     If you pass a VM name in as an argument then it will return info
     for just the named VM, otherwise it will return all VMs.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.vm_cputime
     '''
@@ -767,7 +828,7 @@ def vm_cputime(vm_=None):
                 # Divide by vcpus to always return a number between 0 and 100
                 cputime_percent = (1.0e-7 * cputime / host_cpus) / vcpus
             return {'cputime': int(cputime),
-                    'cputime_percent': int('%.0f' % cputime_percent)}
+                    'cputime_percent': int('{0:.0f}'.format(cputime_percent))}
         info = {}
         if vm_:
             info[vm_] = _info(vm_)
@@ -782,7 +843,9 @@ def vm_cputime(vm_=None):
 def vm_netstats(vm_=None):
     '''
     Return combined network counters used by the vms on this hyper in a
-    list of dicts::
+    list of dicts:
+
+    .. code-block:: python
 
         [
             'your-vm': {
@@ -797,7 +860,9 @@ def vm_netstats(vm_=None):
     If you pass a VM name in as an argument then it will return info
     for just the named VM, otherwise it will return all VMs.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.vm_netstats
     '''
@@ -827,7 +892,9 @@ def vm_netstats(vm_=None):
 def vm_diskstats(vm_=None):
     '''
     Return disk usage counters used by the vms on this hyper in a
-    list of dicts::
+    list of dicts:
+
+    .. code-block:: python
 
         [
             'your-vm': {
@@ -840,7 +907,9 @@ def vm_diskstats(vm_=None):
     If you pass a VM name in as an argument then it will return info
     for just the named VM, otherwise it will return all VMs.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' virt.vm_diskstats
     '''

@@ -1,15 +1,27 @@
+# -*- coding: utf-8 -*-
 '''
-Control of entries in SSH authorized_key files.
-===============================================
+Control of entries in SSH authorized_key files
+==============================================
 
-The information stored in a user's ssh authorized key file can be easily
+The information stored in a user's SSH authorized key file can be easily
 controlled via the ssh_auth state. Defaults can be set by the enc, options,
 and comment keys. These defaults can be overridden by including them in the
 name.
 
+Since the YAML specification limits the length of simple keys to 1024
+characters, and since SSH keys are often longer than that, you may have
+to use a YAML 'explicit key', as demonstrated in the second example below.
+
 .. code-block:: yaml
 
     AAAAB3NzaC1kc3MAAACBAL0sQ9fJ5bYTEyY==:
+      ssh_auth:
+        - present
+        - user: root
+        - enc: ssh-dss
+
+    ? AAAAB3NzaC1kc3MAAACBAL0sQ9fJ5bYTEyY==...
+    :
       ssh_auth:
         - present
         - user: root
@@ -42,7 +54,7 @@ import re
 import sys
 
 
-def _present_test(user, name, enc, comment, options, source, config, env):
+def _present_test(user, name, enc, comment, options, source, config):
     '''
     Run checks for "present"
     '''
@@ -52,7 +64,7 @@ def _present_test(user, name, enc, comment, options, source, config, env):
                 user,
                 source,
                 config,
-                env)
+                saltenv=__env__)
         if keys:
             comment = ''
             for key, status in keys.items():
@@ -104,19 +116,20 @@ def present(
         config='.ssh/authorized_keys',
         **kwargs):
     '''
-    Verifies that the specified ssh key is present for the specified user
+    Verifies that the specified SSH key is present for the specified user
 
     name
-        The ssh key to manage
+        The SSH key to manage
 
     user
-        The user who owns the ssh authorized keys file to modify
+        The user who owns the SSH authorized keys file to modify
 
     enc
-        Defines what type of key is being used, can be ecdsa ssh-rsa, ssh-dss
+        Defines what type of key is being used; can be ed25519, ecdsa, ssh-rsa
+        or ssh-dss
 
     comment
-        The comment to be placed with the ssh public key
+        The comment to be placed with the SSH public key
 
     source
         The source file for the key(s). Can contain any number of public keys,
@@ -156,7 +169,6 @@ def present(
                 options or [],
                 source,
                 config,
-                kwargs.get('__env__', 'base')
                 )
         return ret
 
@@ -165,7 +177,7 @@ def present(
                 user,
                 source,
                 config,
-                kwargs.get('__env__', 'base'))
+                saltenv=__env__)
     else:
         # check if this is of form {options} {enc} {key} {comment}
         sshre = re.compile(r'^(.*?)\s?((?:ssh\-|ecds)[\w-]+\s.+)$')
@@ -225,15 +237,30 @@ def present(
     return ret
 
 
-def absent(name, user, config='.ssh/authorized_keys'):
+def absent(name,
+           user,
+           enc='ssh-rsa',
+           comment='',
+           options=None,
+           config='.ssh/authorized_keys'):
     '''
-    Verifies that the specified ssh key is absent
+    Verifies that the specified SSH key is absent
 
     name
-        The ssh key to manage
+        The SSH key to manage
 
     user
-        The user who owns the ssh authorized keys file to modify
+        The user who owns the SSH authorized keys file to modify
+
+    enc
+        Defines what type of key is being used; can be ed25519, ecdsa, ssh-rsa
+        or ssh-dss
+
+    comment
+        The comment to be placed with the SSH public key
+
+    options
+        The options passed to the key, pass a list object
 
     config
         The location of the authorized keys file relative to the user's home
@@ -245,15 +272,32 @@ def absent(name, user, config='.ssh/authorized_keys'):
            'comment': ''}
 
     # Get just the key
-    name = name.split(' ')[0]
+    sshre = re.compile(r'^(.*?)\s?((?:ssh\-|ecds)[\w-]+\s.+)$')
+    fullkey = sshre.search(name)
+    # if it is {key} [comment]
+    if not fullkey:
+        key_and_comment = name.split()
+        name = key_and_comment[0]
+        if len(key_and_comment) == 2:
+            comment = key_and_comment[1]
+    else:
+        # if there are options, set them
+        if fullkey.group(1):
+            options = fullkey.group(1).split(',')
+        # key is of format: {enc} {key} [comment]
+        comps = fullkey.group(2).split()
+        enc = comps[0]
+        name = comps[1]
+        if len(comps) == 3:
+            comment = comps[2]
 
     if __opts__['test']:
         check = __salt__['ssh.check_key'](
                 user,
                 name,
-                '',
-                '',
-                [],
+                enc,
+                comment,
+                options or [],
                 config)
         if check == 'update' or check == 'exists':
             ret['result'] = None

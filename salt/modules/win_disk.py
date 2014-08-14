@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for gathering disk information on Windows
 
@@ -16,12 +17,16 @@ try:
 except ImportError:
     pass
 
+# Define the module's virtual name
+__virtualname__ = 'disk'
+
+
 def __virtual__():
     '''
     Only works on Windows systems
     '''
     if salt.utils.is_windows():
-        return 'disk'
+        return __virtualname__
     return False
 
 
@@ -29,7 +34,9 @@ def usage():
     '''
     Return usage information for volumes mounted on this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' disk.usage
     '''
@@ -56,9 +63,9 @@ def usage():
             capacity = int(used / float(totalsize) * 100)
             ret['{0}:\\'.format(drive)] = {
                 'filesystem': '{0}:\\'.format(drive),
-                '1K-blocks': totalsize,
-                'used': used,
-                'available': available_space,
+                '1K-blocks': totalsize / 1024,
+                'used': used / 1024,
+                'available': available_space / 1024,
                 'capacity': '{0}%'.format(capacity),
             }
         except Exception:

@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     salt.utils.nb_popen
     ~~~~~~~~~~~~~~~~~~~
 
@@ -9,10 +12,6 @@
     found on:
 
         http://code.activestate.com/recipes/440554/
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2013 by the SaltStack Team, see AUTHORS for more details.
-    :license: Apache 2.0, see LICENSE for more details.
 '''
 
 # Import python libs
@@ -83,7 +82,6 @@ class NonBlockingPopen(subprocess.Popen):
                 self._stderr_logger_name_.format(pid=self.pid)
             )
 
-
         self._stderr_logger = logging.getLogger(
             self._stderr_logger_name_.format(pid=self.pid)
         )
@@ -123,8 +121,8 @@ class NonBlockingPopen(subprocess.Popen):
                 #self._stdin_logger.debug(input.rstrip())
             except ValueError:
                 return self._close('stdin')
-            except (subprocess.pywintypes.error, Exception), why:
-                if why[0] in (109, errno.ESHUTDOWN):
+            except (subprocess.pywintypes.error, Exception) as why:
+                if why.args[0] in (109, errno.ESHUTDOWN):
                     return self._close('stdin')
                 raise
 
@@ -144,8 +142,8 @@ class NonBlockingPopen(subprocess.Popen):
                     (errCode, read) = ReadFile(x, nAvail, None)
             except ValueError:
                 return self._close(which)
-            except (subprocess.pywintypes.error, Exception), why:
-                if why[0] in (109, errno.ESHUTDOWN):
+            except (subprocess.pywintypes.error, Exception) as why:
+                if why.args[0] in (109, errno.ESHUTDOWN):
                     return self._close(which)
                 raise
 
@@ -170,8 +168,8 @@ class NonBlockingPopen(subprocess.Popen):
             try:
                 written = os.write(self.stdin.fileno(), input)
                 #self._stdin_logger.debug(input.rstrip())
-            except OSError, why:
-                if why[0] == errno.EPIPE:  # broken pipe
+            except OSError as why:
+                if why.args[0] == errno.EPIPE:  # broken pipe
                     return self._close('stdin')
                 raise
 
@@ -208,13 +206,25 @@ class NonBlockingPopen(subprocess.Popen):
                     fcntl.fcntl(conn, fcntl.F_SETFL, flags)
 
     def poll_and_read_until_finish(self):
+        silent_iterations = 0
         while self.poll() is None:
             if self.stdout is not None:
+                silent_iterations = 0
                 self.recv()
 
             if self.stderr is not None:
+                silent_iterations = 0
                 self.recv_err()
 
+            silent_iterations += 1
+
+            if silent_iterations > 100:
+                silent_iterations = 0
+                (stdoutdata, stderrdata) = self.communicate()
+                if stdoutdata:
+                    log.debug(stdoutdata)
+                if stderrdata:
+                    log.error(stderrdata)
             time.sleep(0.01)
 
     def communicate(self, input=None):

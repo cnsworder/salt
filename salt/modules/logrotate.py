@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for managing logrotate.
 '''
@@ -25,7 +26,7 @@ def __virtual__():
     '''
     if salt.utils.is_windows():
         return False
-    return 'logrotate'
+    return True
 
 
 def _parse_conf(conf_file=default_conf):

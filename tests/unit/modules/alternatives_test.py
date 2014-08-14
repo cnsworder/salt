@@ -1,32 +1,26 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     tests.unit.modules.alternatives_test
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2013 by the SaltStack Team, see AUTHORS for more details.
-    :license: Apache 2.0, see LICENSE for more details.
 '''
 
 # Import Salt Testing libs
 from salttesting import skipIf, TestCase
 from salttesting.helpers import ensure_in_syspath, TestsLoggingHandler
+from salttesting.mock import NO_MOCK, NO_MOCK_REASON, MagicMock, patch
+
 ensure_in_syspath('../../')
 
 # Import salt libs
 from salt.modules import alternatives
 
-# Import 3rd party libs
-try:
-    from mock import MagicMock, patch
-    HAS_MOCK = True
-except ImportError:
-    HAS_MOCK = False
-
 alternatives.__salt__ = alternatives.__grains__ = {}
 
 
-@skipIf(HAS_MOCK is False, 'mock python module is unavailable')
+@skipIf(NO_MOCK, NO_MOCK_REASON)
 class AlternativesTestCase(TestCase):
 
     def test_display(self):
@@ -36,7 +30,8 @@ class AlternativesTestCase(TestCase):
                 solution = alternatives.display('better-world')
                 self.assertEqual('salt', solution)
                 mock.assert_called_once_with(
-                    'alternatives --display better-world'
+                    ['alternatives', '--display', 'better-world'],
+                    python_shell=False
                 )
 
         with patch.dict(alternatives.__grains__, {'os_family': 'Ubuntu'}):
@@ -47,7 +42,8 @@ class AlternativesTestCase(TestCase):
                 solution = alternatives.display('better-world')
                 self.assertEqual('undoubtedly-salt', solution)
                 mock.assert_called_once_with(
-                    'update-alternatives --display better-world'
+                    ['update-alternatives', '--display', 'better-world'],
+                    python_shell=False
                 )
 
         with patch.dict(alternatives.__grains__, {'os_family': 'RedHat'}):
@@ -62,7 +58,8 @@ class AlternativesTestCase(TestCase):
                 solution = alternatives.display('better-world')
                 self.assertEqual('salt-err', solution)
                 mock.assert_called_once_with(
-                    'alternatives --display better-world'
+                    ['alternatives', '--display', 'better-world'],
+                    python_shell=False
                 )
 
     @patch('os.readlink')
@@ -109,8 +106,9 @@ class AlternativesTestCase(TestCase):
                 )
                 self.assertEqual('salt', solution)
                 mock.assert_called_once_with(
-                    'alternatives --install /usr/bin/better-world '
-                    'better-world /usr/bin/salt 100'
+                    ['alternatives', '--install', '/usr/bin/better-world',
+                     'better-world', '/usr/bin/salt', '100'],
+                    python_shell=False
                 )
 
         with patch.dict(alternatives.__grains__, {'os_family': 'Debian'}):
@@ -124,8 +122,9 @@ class AlternativesTestCase(TestCase):
                 )
                 self.assertEqual('salt', solution)
                 mock.assert_called_once_with(
-                    'update-alternatives --install /usr/bin/better-world '
-                    'better-world /usr/bin/salt 100'
+                    ['update-alternatives', '--install', '/usr/bin/better-world',
+                     'better-world', '/usr/bin/salt', '100'],
+                    python_shell=False
                 )
 
         with patch.dict(alternatives.__grains__, {'os_family': 'RedHat'}):
@@ -145,8 +144,9 @@ class AlternativesTestCase(TestCase):
                 )
                 self.assertEqual('salt-err', ret)
                 mock.assert_called_once_with(
-                    'alternatives --install /usr/bin/better-world '
-                    'better-world /usr/bin/salt 100'
+                    ['alternatives', '--install', '/usr/bin/better-world',
+                     'better-world', '/usr/bin/salt', '100'],
+                    python_shell=False
                 )
 
     def test_remove(self):
@@ -159,7 +159,8 @@ class AlternativesTestCase(TestCase):
                 )
                 self.assertEqual('salt', solution)
                 mock.assert_called_once_with(
-                    'alternatives --remove better-world /usr/bin/better-world'
+                    ['alternatives', '--remove', 'better-world',
+                     '/usr/bin/better-world'], python_shell=False
                 )
 
         with patch.dict(alternatives.__grains__, {'os_family': 'Debian'}):
@@ -171,8 +172,8 @@ class AlternativesTestCase(TestCase):
                 )
                 self.assertEqual('salt', solution)
                 mock.assert_called_once_with(
-                    'update-alternatives --remove better-world '
-                    '/usr/bin/better-world'
+                    ['update-alternatives', '--remove', 'better-world',
+                     '/usr/bin/better-world'], python_shell=False
                 )
 
         with patch.dict(alternatives.__grains__, {'os_family': 'RedHat'}):
@@ -190,9 +191,9 @@ class AlternativesTestCase(TestCase):
                 )
                 self.assertEqual('salt-err', solution)
                 mock.assert_called_once_with(
-                    'alternatives --remove better-world /usr/bin/better-world'
+                    ['alternatives', '--remove', 'better-world',
+                     '/usr/bin/better-world'], python_shell=False
                 )
-
 
 
 if __name__ == '__main__':

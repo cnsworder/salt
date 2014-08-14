@@ -15,8 +15,14 @@ of the Salt system each have a respective configuration file. The
 The Salt Minion configuration is very simple, typically the only value that
 needs to be set is the master value so the minion can find its master.
 
+By default, the salt-minion configuration will be in :file:`/etc/salt/minion`.
+A notable exception is FreeBSD, where the configuration will be in
+:file:`/usr/local/etc/salt/minion`.
+
+
+
 Minion Primary Configuration
-----------------------------
+============================
 
 .. conf_minion:: master
 
@@ -27,9 +33,94 @@ Default: ``salt``
 
 The hostname or ipv4 of the master.
 
+Default: ``salt``
+
 .. code-block:: yaml
 
     master: salt
+
+The option can can also be set to a list of masters, enabling
+:doc:`multi-master </topics/tutorials/multimaster>` mode.
+
+.. code-block:: yaml
+
+    master:
+      - address1
+      - address2
+
+.. versionchanged:: 2014.7.0
+
+    The master can be dynamically configured. The :conf_minion:`master` value
+    can be set to an module function which will be executed and will assume
+    that the returning value is the ip or hostname of the desired master. If a
+    function is being specified, then the :conf_minion:`master_type` option
+    must be set to ``func``, to tell the minion that the value is a function to
+    be run and not a fully-qualified domain name.
+
+    .. code-block:: yaml
+
+        master: module.function
+        master_type: func
+
+    In addition, instead of using multi-master mode, the minion can be
+    configured to use the list of master addresses as a failover list, trying
+    the first address, then the second, etc. until the minion successfully
+    connects. To enable this behavior, set :conf_minion:`master_type` to
+    ``failover``:
+
+    .. code-block:: yaml
+
+        master:
+          - address1
+          - address2
+        master_type: failover
+
+.. conf_minion:: master_type
+
+``master_type``
+---------------
+
+.. versionadded:: 2014.7.0
+
+Default: ``str``
+
+The type of the :conf_minion:`master` variable. Can be either ``func`` or
+``failover``.
+
+If the master needs to be dynamically assigned by executing a function instead
+of reading in the static master value, set this to ``func``. This can be used
+to manage the minion's master setting from an execution module. By simply
+changing the algorithm in the module to return a new master ip/fqdn, restart
+the minion and it will connect to the new master.
+
+
+.. code-block:: yaml
+
+    master_type: func
+
+If this option is set to ``failover``, :conf_minion:`master` must be a list of
+master addresses. The minion will then try each master in the order specified
+in the list until it successfully connects.
+
+
+.. code-block:: yaml
+
+    master_type: failover
+
+``master_shuffle``
+------------------
+
+.. versionadded:: 2014.7.0
+
+Default: ``False``
+
+If :conf_minion:`master` is a list of addresses, shuffle them before trying to
+connect to distribute the minions over all available masters. This uses
+Python's :func:`random.shuffle <python2:random.shuffle>` method.
+
+.. code-block:: yaml
+
+    master_shuffle: True
 
 .. conf_minion:: master_port
 
@@ -113,7 +204,7 @@ Default: the system's hostname
 
 Explicitly declare the id for this minion to use. Since Salt uses detached ids
 it is possible to run multiple minions on the same machine but with different
-ids. This can be useful for Salt compute clusters.
+ids.
 
 .. code-block:: yaml
 
@@ -159,6 +250,13 @@ Verify and set permissions on configuration directories at startup.
 .. code-block:: yaml
 
     verify_env: True
+
+.. note::
+
+    When marked as True the verify_env option requires WRITE access to the
+    configuration directory (/etc/salt/). In certain situations such as
+    mounting /etc/salt/ as read-only for templating this will create a
+    stack trace when state.highstate is called.
 
 .. conf_minion:: cache_jobs
 
@@ -247,21 +345,6 @@ seconds each iteration.
 
     acceptance_wait_time_max: None
 
-.. conf_minion:: dns_check
-
-``dns_check``
--------------
-
-Default: ``True``
-
-When healing, a dns_check is run. This is to make sure that the originally
-resolved dns has not changed. If this is something that does not happen in your
-environment, set this value to ``False``.
-
-.. code-block:: yaml
-
-    dns_check: True
-
 .. conf_minion:: ipc_mode
 
 ``ipc_mode``
@@ -302,8 +385,10 @@ Pull port used when :conf_minion:`ipc_mode` is set to ``tcp``.
 
     tcp_pull_port: 4511
 
+
+
 Minion Module Management
-------------------------
+========================
 
 .. conf_minion:: disable_modules
 
@@ -382,6 +467,21 @@ A list of extra directories to search for Salt states
       - /var/lib/salt/states
 
 
+.. conf_minion:: grains_dirs
+
+``grains_dirs``
+---------------
+
+Default: ``[]``
+
+A list of extra directories to search for Salt grains
+
+.. code-block:: yaml
+
+    grains_dirs:
+      - /var/lib/salt/grains
+
+
 .. conf_minion:: render_dirs
 
 ``render_dirs``
@@ -425,11 +525,11 @@ below.
 .. code-block:: yaml
 
     providers:
-      pkg: yumpkg5
       service: systemd
 
+
 State Management Settings
--------------------------
+=========================
 
 .. conf_minion:: renderer
 
@@ -519,8 +619,10 @@ environments is to isolate via the top file.
 
     environment: None
 
+
+
 File Directory Settings
------------------------
+=======================
 
 .. conf_minion:: file_client
 
@@ -604,8 +706,10 @@ the pillar environments.
       prod:
         - /srv/pillar/prod
 
+
+
 Security Settings
------------------
+=================
 
 .. conf_minion:: open_mode
 
@@ -622,8 +726,64 @@ minion to clean the keys.
 
     open_mode: False
 
+.. conf_minion:: verify_master_pubkey_sign
+
+
+``verify_master_pubkey_sign``
+-----------------------------
+
+Default: ``False``
+
+Enables verification of the master-public-signature returned by the master in
+auth-replies. Please see the tutorial on how to configure this properly
+`Multimaster-PKI with Failover Tutorial <http://docs.saltstack.com/en/latest/topics/tutorials/multimaster_pki.html>`_
+
+.. versionadded:: 2014.7.0
+
+.. code-block:: yaml
+
+    verify_master_pubkey_sign: True
+
+If this is set to ``True``, :conf_master:`master_sign_pubkey` must be also set
+to ``True`` in the master configuration file.
+
+
+.. conf_minion:: master_sign_key_name
+
+``master_sign_key_name``
+------------------------
+
+Default: ``master_sign``
+
+The filename without the \*.pub-suffix of the public that should be used for
+verifying the signature from the master. The file must be located in the minions
+pki-directory.
+
+.. versionadded:: 2014.7.0
+
+.. code-block:: yaml
+
+    master_sign_key_name: <filename_without_suffix>
+
+.. conf_minion:: always_verify_signature
+
+``always_verify_signature``
+---------------------------
+
+Default: ``False``
+
+If :conf_minion:`verify_master_pubkey_sign` is enabled, the signature is only verified,
+if the public-key of the master changes. If the signature should always be verified,
+this can be set to ``True``.
+
+.. versionadded:: 2014.7.0
+
+.. code-block:: yaml
+
+    always_verify_signature: True
+
 Thread Settings
----------------
+===============
 
 .. conf_minion:: multiprocessing
 
@@ -636,20 +796,25 @@ publication a new process is spawned and the command is executed therein.
 
     multiprocessing: True
 
+
+
+
+.. _minion-logging-settings:
+
 Minion Logging Settings
------------------------
+=======================
 
 .. conf_minion:: log_file
 
 ``log_file``
 ------------
 
-Default: /var/log/salt/minion
+Default: ``/var/log/salt/minion``
 
-The minion log can be sent to a regular file, local path name, or network location.
-Remote logging works best when configured to use rsyslogd(8) (e.g.: ``file:///dev/log``),
-with rsyslogd(8) configured for network logging.  The format for remote addresses is:
-``<file|udp|tcp>://<host|socketpath>:<port-if-required>/<log-facility>``.  Examples:
+The minion log can be sent to a regular file, local path name, or network
+location.  See also :conf_log:`log_file`.
+
+Examples:
 
 .. code-block:: yaml
 
@@ -663,6 +828,8 @@ with rsyslogd(8) configured for network logging.  The format for remote addresse
 
     log_file: udp://loghost:10514
 
+
+
 .. conf_minion:: log_level
 
 ``log_level``
@@ -670,12 +837,14 @@ with rsyslogd(8) configured for network logging.  The format for remote addresse
 
 Default: ``warning``
 
-The level of messages to send to the console.
-One of 'garbage', 'trace', 'debug', info', 'warning', 'error', 'critical'.
+The level of messages to send to the console. See also :conf_log:`log_level`.
 
 .. code-block:: yaml
 
     log_level: warning
+
+
+
 
 .. conf_minion:: log_level_logfile
 
@@ -684,12 +853,14 @@ One of 'garbage', 'trace', 'debug', info', 'warning', 'error', 'critical'.
 
 Default: ``warning``
 
-The level of messages to send to the log file.
-One of 'garbage', 'trace', 'debug', info', 'warning', 'error', 'critical'.
+The level of messages to send to the log file. See also
+:conf_log:`log_level_logfile`.
 
 .. code-block:: yaml
 
     log_level_logfile: warning
+
+
 
 .. conf_minion:: log_datefmt
 
@@ -698,12 +869,15 @@ One of 'garbage', 'trace', 'debug', info', 'warning', 'error', 'critical'.
 
 Default: ``%H:%M:%S``
 
-The date and time format used in console log messages. Allowed date/time formatting
-can be seen on :func:`time.strftime <python2:time.strftime>`.
+The date and time format used in console log messages. See also
+:conf_log:`log_datefmt`.
 
 .. code-block:: yaml
 
     log_datefmt: '%H:%M:%S'
+
+
+
 
 .. conf_minion:: log_datefmt_logfile
 
@@ -712,12 +886,14 @@ can be seen on :func:`time.strftime <python2:time.strftime>`.
 
 Default: ``%Y-%m-%d %H:%M:%S``
 
-The date and time format used in log file messages. Allowed date/time formatting
-can be seen on :func:`time.strftime <python2:time.strftime>`.
+The date and time format used in log file messages. See also
+:conf_log:`log_datefmt_logfile`.
 
 .. code-block:: yaml
 
     log_datefmt_logfile: '%Y-%m-%d %H:%M:%S'
+
+
 
 .. conf_minion:: log_fmt_console
 
@@ -726,12 +902,14 @@ can be seen on :func:`time.strftime <python2:time.strftime>`.
 
 Default: ``[%(levelname)-8s] %(message)s``
 
-The format of the console logging messages. Allowed formatting options can
-be seen on the :ref:`LogRecord attributes <python2:logrecord-attributes>`.
+The format of the console logging messages. See also
+:conf_log:`log_fmt_console`.
 
 .. code-block:: yaml
 
     log_fmt_console: '[%(levelname)-8s] %(message)s'
+
+
 
 .. conf_minion:: log_fmt_logfile
 
@@ -740,12 +918,14 @@ be seen on the :ref:`LogRecord attributes <python2:logrecord-attributes>`.
 
 Default: ``%(asctime)s,%(msecs)03.0f [%(name)-17s][%(levelname)-8s] %(message)s``
 
-The format of the log file logging messages. Allowed formatting options can
-be seen on the :ref:`LogRecord attributes <python2:logrecord-attributes>`.
+The format of the log file logging messages. See also
+:conf_log:`log_fmt_logfile`.
 
 .. code-block:: yaml
 
     log_fmt_logfile: '%(asctime)s,%(msecs)03.0f [%(name)-17s][%(levelname)-8s] %(message)s'
+
+
 
 .. conf_minion:: log_granular_levels
 
@@ -754,15 +934,13 @@ be seen on the :ref:`LogRecord attributes <python2:logrecord-attributes>`.
 
 Default: ``{}``
 
-This can be used to control logging levels more specifically.  This
-example sets the main salt library at the 'warning' level, but sets 
-'salt.modules' to log at the 'debug' level:
+This can be used to control logging levels more specifically. See also
+:conf_log:`log_granular_levels`.
 
-.. code-block:: yaml
 
-  log_granular_levels:
-    'salt': 'warning',
-    'salt.modules': 'debug'
+
+Include Configuration
+=====================
 
 .. conf_minion:: include
 
@@ -792,7 +970,7 @@ option then the minion will log a warning message.
 
     # Include files from a minion.d directory in the same
     # directory as the minion config file
-    include: minion.d/*
+    include: minion.d/*.conf
 
     # Include a single extra file into the configuration
     include: /etc/roles/webserver
@@ -804,8 +982,9 @@ option then the minion will log a warning message.
       - /etc/roles/webserver
 
 
+
 Frozen Build Update Settings
-----------------------------
+============================
 
 These options control how :py:func:`salt.modules.saltutil.update` works with esky
 frozen apps. For more information look at `<https://github.com/cloudmatrix/esky/>`_.

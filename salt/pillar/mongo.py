@@ -1,5 +1,8 @@
+# -*- coding: utf-8 -*-
 '''
-Read pillar data from a mongodb collection.
+Read Pillar data from a mongodb collection
+
+:depends: pymongo (for salt-master)
 
 This module will load a node-specific pillar dictionary from a mongo
 collection. It uses the node's id for lookups and can load either the whole
@@ -30,7 +33,7 @@ Configuring the Mongo ext_pillar
 The Mongo ext_pillar takes advantage of the fact that the Salt Master
 configuration file is yaml. It uses a sub-dictionary of values to adjust
 specific features of the pillar. This is the explicit single-line dictionary
-notation for yaml. One may be able to get the easier-to-read multine dict to
+notation for yaml. One may be able to get the easier-to-read multi-line dict to
 work correctly with some experimentation.
 
 .. code-block:: yaml

@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 '''
+    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
+
+
     tests.unit.pillar_test
     ~~~~~~~~~~~~~~~~~~~~~~
-
-    :codeauthor: :email:`Pedro Algarvio (pedro@algarvio.me)`
-    :copyright: © 2013 by the SaltStack Team, see AUTHORS for more details.
-    :license: Apache 2.0, see LICENSE for more details.
 '''
 
 import tempfile
@@ -13,20 +12,14 @@ import tempfile
 # Import Salt Testing libs
 from salttesting import skipIf, TestCase
 from salttesting.helpers import ensure_in_syspath
+from salttesting.mock import NO_MOCK, NO_MOCK_REASON, MagicMock, patch
 ensure_in_syspath('../')
 
 # Import salt libs
 import salt.pillar
 
-# Import 3rd-party libs
-try:
-    from mock import MagicMock, patch
-    HAS_MOCK = True
-except ImportError:
-    HAS_MOCK = False
 
-
-@skipIf(HAS_MOCK is False, 'mock python module is unavailable')
+@skipIf(NO_MOCK, NO_MOCK_REASON)
 class PillarTestCase(TestCase):
 
     @patch('salt.pillar.compile_template')
@@ -35,6 +28,7 @@ class PillarTestCase(TestCase):
             'renderer': 'json',
             'state_top': '',
             'pillar_roots': [],
+            'file_roots': [],
             'extension_modules': ''
         }
         grains = {
@@ -115,6 +109,7 @@ class PillarTestCase(TestCase):
             'pillar_roots': [],
             'extension_modules': '',
             'environment': 'base',
+            'file_roots': [],
         }
         grains = {
             'os': 'Ubuntu',
@@ -172,7 +167,12 @@ ssh:
         def get_state(sls, env):
             return {
                 'ssh': {'path': '', 'dest': self.ssh_file.name},
-                'ssh.minion': {'path': '', 'dest': self.ssh_minion_file.name}, 
+                'ssh.minion': {'path': '', 'dest': self.ssh_minion_file.name},
             }[sls]
 
         client.get_state.side_effect = get_state
+
+
+if __name__ == '__main__':
+    from integration import run_tests
+    run_tests(PillarTestCase, needs_daemon=False)

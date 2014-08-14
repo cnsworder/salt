@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for returning various status data about a minion.
 These data can be useful for compiling into stats later.
@@ -10,6 +11,9 @@ import fnmatch
 
 # Import salt libs
 import salt.utils
+from salt.utils.network import remote_port_tcp as _remote_port_tcp
+import salt.utils.event
+import salt.config
 
 
 __opts__ = {}
@@ -20,7 +24,7 @@ __opts__ = {}
 def __virtual__():
     if salt.utils.is_windows():
         return False
-    return 'status'
+    return True
 
 
 def _number(text):
@@ -42,7 +46,9 @@ def procs():
     '''
     Return the process data
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.procs
     '''
@@ -89,7 +95,9 @@ def custom():
     By default, nothing is returned. Warning: Depending on what you
     include, there can be a LOT here!
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.custom
     '''
@@ -97,7 +105,7 @@ def custom():
     conf = __salt__['config.dot_vals']('status')
     for key, val in conf.items():
         func = '{0}()'.format(key.split('.')[1])
-        vals = eval(func)
+        vals = eval(func)  # pylint: disable=W0123
 
         for item in val:
             ret[item] = vals[item]
@@ -109,7 +117,9 @@ def uptime():
     '''
     Return the uptime for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.uptime
     '''
@@ -120,7 +130,9 @@ def loadavg():
     '''
     Return the load averages for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.loadavg
     '''
@@ -134,7 +146,9 @@ def cpustats():
     '''
     Return the CPU stats for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.cpustats
     '''
@@ -169,9 +183,11 @@ def cpustats():
 
 def meminfo():
     '''
-    Return the CPU stats for this minion
+    Return the memory info for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.meminfo
     '''
@@ -197,7 +213,9 @@ def cpuinfo():
     '''
     Return the CPU info for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.cpuinfo
     '''
@@ -222,7 +240,9 @@ def diskstats():
     '''
     Return the disk stats for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.diskstats
     '''
@@ -260,7 +280,9 @@ def diskusage(*args):
 
         salt '*' status.diskusage [paths and/or filesystem types]
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.diskusage         # usage for all filesystems
         salt '*' status.diskusage / /tmp  # usage for / and /tmp
@@ -284,7 +306,7 @@ def diskusage(*args):
                 # select fstype
                 fstypes.add(arg)
 
-    if len(fstypes) > 0:
+    if fstypes:
         # determine which mount points host the specified fstypes
         regex = re.compile(
             '|'.join(
@@ -315,7 +337,9 @@ def vmstats():
     '''
     Return the virtual memory stats for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.vmstats
     '''
@@ -332,11 +356,31 @@ def vmstats():
     return ret
 
 
+def nproc():
+    '''
+    Return the number of processing units available on this system
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' status.nproc
+    '''
+    data = __salt__['cmd.run']('nproc')
+    try:
+        ret = int(data.strip())
+    except Exception:
+        return 0
+    return ret
+
+
 def netstats():
     '''
     Return the network stats for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.netstats
     '''
@@ -369,7 +413,9 @@ def netdev():
     '''
     Return the network device stats for this minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.netdev
     '''
@@ -412,7 +458,9 @@ def w():  # pylint: disable=C0103
     '''
     Return a list of logged in users for this minion, using the w command
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.w
     '''
@@ -438,7 +486,9 @@ def all_status():
     Return a composite of all status data and info for this minion.
     Warning: There is a LOT here!
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.all_status
     '''
@@ -460,7 +510,9 @@ def pid(sig):
     Return the PID or an empty string if the process is running or not.
     Pass a signature to use to find the process via ps.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' status.pid <sig>
     '''
@@ -470,6 +522,50 @@ def pid(sig):
     if (not sig.endswith('"') and not sig.endswith("'") and
             not sig.startswith('-')):
         sig = "'" + sig + "'"
-    cmd = "{0[ps]} | grep {1} | grep -v grep | awk '{{print $2}}'".format(
-        __grains__, sig)
-    return (__salt__['cmd.run_stdout'](cmd) or '')
+    cmd = ("{0[ps]} | grep {1} | grep -v grep | fgrep -v status.pid | "
+           "awk '{{print $2}}'".format(__grains__, sig))
+    return __salt__['cmd.run_stdout'](cmd) or ''
+
+
+def version():
+    '''
+    Return the system version for this minion
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' status.version
+    '''
+    procf = '/proc/version'
+    if not os.path.isfile(procf):
+        return {}
+    ret = salt.utils.fopen(procf, 'r').read().strip()
+
+    return ret
+
+
+def master(master_ip=None, connected=True):
+    '''
+    .. versionadded:: 2014.7.0
+
+    Fire an event if the minion gets disconnected from its master. This
+    function is meant to be run via a scheduled job from the minion
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' status.master
+    '''
+    port = int(__salt__['config.option']('publish_port'))
+    ips = _remote_port_tcp(port)
+
+    if connected:
+        if master_ip not in ips:
+            event = salt.utils.event.get_event('minion', opts=__opts__, listen=False)
+            event.fire_event({'master': master_ip}, '__master_disconnected')
+    else:
+        if master_ip in ips:
+            event = salt.utils.event.get_event('minion', opts=__opts__, listen=False)
+            event.fire_event({'master': master_ip}, '__master_connected')

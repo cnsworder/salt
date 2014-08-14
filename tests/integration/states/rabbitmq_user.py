@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 '''
 Tests for the rabbitmq state
 '''
@@ -35,7 +37,7 @@ class RabbitUserTestCase(integration.ModuleCase,
             'rabbitmq_user.present', name='null_name', test=True
         )
         self.assertSaltFalseReturn(ret)
-        self.assertInSaltComment(ret, 'User null_name is set to be created')
+        self.assertInSaltComment('User null_name is set to be created', ret)
 
     def absent(self):
         '''

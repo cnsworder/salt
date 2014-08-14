@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Wrapper module for at(1)
 
@@ -24,9 +25,9 @@ def __virtual__():
     '''
     Most everything has the ability to support at(1)
     '''
-    if salt.utils.is_windows() or not salt.utils.which('at'):
+    if salt.utils.is_windows() or salt.utils.which('at') is None:
         return False
-    return 'at'
+    return True
 
 
 def _cmd(binary, *args):
@@ -58,13 +59,13 @@ def atq(tag=None):
     # Shim to produce output similar to what __virtual__() should do
     # but __salt__ isn't available in __virtual__()
     # Tested on CentOS 5.8
-    if __grains__['os_family'] == "RedHat":
+    if __grains__['os_family'] == 'RedHat':
         output = _cmd('at', '-l')
     else:
         output = _cmd('atq')
 
     if output is None:
-        return '"{0}" is not available.'.format('at.atq')
+        return '\'at.atq\' is not available.'
 
     # No jobs so return
     if output == '':
@@ -147,7 +148,7 @@ def atrm(*args):
 
     # Need to do this here also since we use atq()
     if not salt.utils.which('at'):
-        return '"{0}" is not available.'.format('at.atrm')
+        return '\'at.atrm\' is not available.'
 
     if not args:
         return {'jobs': {'removed': [], 'tag': None}}
@@ -168,7 +169,7 @@ def atrm(*args):
     # but __salt__ isn't available in __virtual__()
     output = _cmd('at', '-d', ' '.join(opts))
     if output is None:
-        return '"{0}" is not available.'.format('at.atrm')
+        return '\'at.atrm\' is not available.'
 
     return ret
 
@@ -196,7 +197,7 @@ def at(*args, **kwargs):  # pylint: disable=C0103
     # but __salt__ isn't available in __virtual__()
     binary = salt.utils.which('at')
     if not binary:
-        return '"{0}" is not available.'.format('at.at')
+        return '\'at.at\' is not available.'
 
     if __grains__['os_family'] == 'RedHat':
         echo_cmd = 'echo -e'
@@ -217,7 +218,7 @@ def at(*args, **kwargs):  # pylint: disable=C0103
         output = __salt__['cmd.run']('{0}'.format(cmd))
 
     if output is None:
-        return '"{0}" is not available.'.format('at.at')
+        return '\'at.at\' is not available.'
 
     if output.endswith('Garbled time'):
         return {'jobs': [], 'error': 'invalid timespec'}
@@ -253,8 +254,109 @@ def atc(jobid):
     output = _cmd('at', '-c', str(jobid))
 
     if output is None:
-        return '"{0}" is not available.'.format('at.atc')
+        return '\'at.atc\' is not available.'
     elif output == '':
-        return {'error': 'invalid job id "{0}"'.format(str(jobid))}
+        return {'error': 'invalid job id {0!r}'.format(jobid)}
 
     return output
+
+
+def _atq(**kwargs):
+    '''
+    Return match jobs list
+    '''
+
+    jobs = []
+
+    runas = kwargs.get('runas', None)
+    tag = kwargs.get('tag', None)
+    hour = kwargs.get('hour', None)
+    minute = kwargs.get('minute', None)
+    day = kwargs.get('day', None)
+    month = kwargs.get('month', None)
+    year = kwargs.get('year', None)
+    if year and len(str(year)) == 2:
+        year = '20{0}'.format(year)
+
+    jobinfo = atq()['jobs']
+    if not jobinfo:
+        return {'jobs': jobs}
+
+    for job in jobinfo:
+
+        if not runas:
+            pass
+        elif runas == job['user']:
+            pass
+        else:
+            continue
+
+        if not tag:
+            pass
+        elif tag == job['tag']:
+            pass
+        else:
+            continue
+
+        if not hour:
+            pass
+        elif '{0:02d}'.format(int(hour)) == job['time'].split(':')[0]:
+            pass
+        else:
+            continue
+
+        if not minute:
+            pass
+        elif '{0:02d}'.format(int(minute)) == job['time'].split(':')[1]:
+            pass
+        else:
+            continue
+
+        if not day:
+            pass
+        elif '{0:02d}'.format(int(day)) == job['date'].split('-')[2]:
+            pass
+        else:
+            continue
+
+        if not month:
+            pass
+        elif '{0:02d}'.format(int(month)) == job['date'].split('-')[1]:
+            pass
+        else:
+            continue
+
+        if not year:
+            pass
+        elif year == job['date'].split('-')[0]:
+            pass
+        else:
+            continue
+
+        jobs.append(job)
+
+    if not jobs:
+        note = 'No match jobs or time format error'
+        return {'jobs': jobs, 'note': note}
+
+    return {'jobs': jobs}
+
+
+def jobcheck(**kwargs):
+    '''
+    Check the job from queue.
+    The kwargs dict include 'hour minute day month year tag runas'
+    Other parameters will be ignored.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' at.jobcheck runas=jam day=13
+        salt '*' at.jobcheck day=13 month=12 year=13 tag=rose
+    '''
+
+    if not kwargs:
+        return {'error': 'You have given a condition'}
+
+    return _atq(**kwargs)

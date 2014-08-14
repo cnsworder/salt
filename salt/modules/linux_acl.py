@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Support for Linux File Access Control Lists
 '''
@@ -5,13 +6,16 @@ Support for Linux File Access Control Lists
 # Import salt libs
 import salt.utils
 
+# Define the module's virtual name
+__virtualname__ = 'acl'
+
 
 def __virtual__():
     '''
     Only load the module if getfacl is installed
     '''
     if salt.utils.which('getfacl'):
-        return 'acl'
+        return __virtualname__
     return False
 
 
@@ -91,7 +95,12 @@ def getfacl(*args):
             for entity in ('other', 'mask'):
                 if entity in vals.keys():
                     del vals[entity]
-                    ret[dentry][entity] = vals
+                    if acl_type == 'acl':
+                        ret[dentry][entity] = vals
+                    elif acl_type == 'default':
+                        if 'defaults' not in ret[dentry].keys():
+                            ret[dentry]['defaults'] = {}
+                        ret[dentry]['defaults'][entity] = vals
     return ret
 
 

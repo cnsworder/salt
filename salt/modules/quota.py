@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for managing quotas on POSIX-like systems.
 '''
@@ -7,6 +8,7 @@ import logging
 
 # Import salt libs
 import salt.utils
+from salt.exceptions import CommandExecutionError, SaltInvocationError
 
 log = logging.getLogger(__name__)
 
@@ -19,18 +21,20 @@ __func_alias__ = {
 
 def __virtual__():
     '''
-    Only work on POSIX-like systems
+    Only work on POSIX-like systems with setquota binary available
     '''
-    if salt.utils.is_windows():
-        return False
-    return 'quota'
+    if not salt.utils.is_windows() and salt.utils.which('setquota'):
+        return 'quota'
+    return False
 
 
 def report(mount):
     '''
     Report on quotas for a specific volume
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' quota.report /media/data
     '''
@@ -89,7 +93,9 @@ def set_(device, **kwargs):
     '''
     Calls out to setquota, for a specific user or group
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' quota.set /media/data user=larry block-soft-limit=1048576
         salt '*' quota.set /media/data group=painters file-hard-limit=1000
@@ -110,7 +116,9 @@ def set_(device, **kwargs):
 
     if 'group' in kwargs:
         if 'user' in kwargs:
-            return {'Error': 'Please specify a user or group, not both.'}
+            raise SaltInvocationError(
+                'Please specify a user or group, not both.'
+            )
         cmd += ' -g {0} '.format(kwargs['group'])
         parsed = _parse_quota(device, '-g')
         if kwargs['group'] in parsed:
@@ -120,7 +128,7 @@ def set_(device, **kwargs):
         ret = 'Group: {0}'.format(kwargs['group'])
 
     if not current:
-        return {'Error': 'A valid user or group was not found'}
+        raise CommandExecutionError('A valid user or group was not found')
 
     for limit in ('block-soft-limit', 'block-hard-limit',
                   'file-soft-limit', 'file-hard-limit'):
@@ -133,8 +141,12 @@ def set_(device, **kwargs):
                                         current['file-hard-limit'],
                                         device)
 
-    __salt__['cmd.run'](cmd)
-
+    result = __salt__['cmd.run_all'](cmd)
+    if result['retcode'] != 0:
+        raise CommandExecutionError(
+            'Unable to set desired quota. Error follows: \n{0}'
+            .format(result['stderr'])
+        )
     return {ret: current}
 
 
@@ -143,7 +155,9 @@ def warn():
     Runs the warnquota command, to send warning emails to users who
     are over their quota limit.
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' quota.warn
     '''
@@ -154,7 +168,9 @@ def stats():
     '''
     Runs the quotastats command, and returns the parsed output
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' quota.stats
     '''
@@ -173,7 +189,9 @@ def on(device):
     '''
     Turns on the quota system
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' quota.on
     '''
@@ -186,7 +204,9 @@ def off(device):
     '''
     Turns off the quota system
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' quota.off
     '''
@@ -199,7 +219,9 @@ def get_mode(device):
     '''
     Report whether the quota system for this device is on or off
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' quota.get_mode
     '''

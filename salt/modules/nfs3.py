@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 '''
 Module for managing NFS version 3.
 '''
@@ -17,7 +18,7 @@ def __virtual__():
     '''
     if not salt.utils.which('showmount'):
         return False
-    return 'nfs3'
+    return True
 
 
 def list_exports(exports='/etc/exports'):

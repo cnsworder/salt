@@ -1,10 +1,10 @@
+# -*- coding: utf-8 -*-
 '''
 Manage users with the useradd command
 '''
 
 # Import python libs
 try:
-    import grp
     import pwd
 except ImportError:
     pass
@@ -17,13 +17,16 @@ from salt._compat import string_types
 
 log = logging.getLogger(__name__)
 
+# Define the module's virtual name
+__virtualname__ = 'user'
+
 
 def __virtual__():
     '''
     Set the user module if the kernel is SunOS
     '''
 
-    return 'user' if __grains__['kernel'] == 'SunOS' else False
+    return __virtualname__ if __grains__['kernel'] == 'SunOS' else False
 
 
 def _get_gecos(name):
@@ -70,7 +73,9 @@ def add(name,
     '''
     Add a user to the minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.add name <uid> <gid> <groups> <home> <shell>
     '''
@@ -131,7 +136,9 @@ def delete(name, remove=False, force=False):
     '''
     Remove a user from the minion
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.delete name remove=True force=True
     '''
@@ -148,15 +155,17 @@ def delete(name, remove=False, force=False):
     return not ret['retcode']
 
 
-def getent():
+def getent(refresh=False):
     '''
     Return the list of all info for all users
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.getent
     '''
-    if 'user.getent' in __context__:
+    if 'user.getent' in __context__ and not refresh:
         return __context__['user.getent']
 
     ret = []
@@ -170,7 +179,9 @@ def chuid(name, uid):
     '''
     Change the uid for a named user
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chuid foo 4376
     '''
@@ -189,7 +200,9 @@ def chgid(name, gid):
     '''
     Change the default group of the user
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chgid foo 4376
     '''
@@ -208,7 +221,9 @@ def chshell(name, shell):
     '''
     Change the default shell of the user
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chshell foo /bin/zsh
     '''
@@ -228,7 +243,9 @@ def chhome(name, home, persist=False):
     Change the home directory of the user, pass true for persist to copy files
     to the new home dir
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chhome foo /home/users/foo True
     '''
@@ -251,7 +268,9 @@ def chgroups(name, groups, append=False):
     Change the groups this user belongs to, add append to append the specified
     groups
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chgroups foo wheel,root True
     '''
@@ -270,7 +289,9 @@ def chfullname(name, fullname):
     '''
     Change the user's Full Name
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chfullname foo "Foo Bar"
     '''
@@ -294,7 +315,9 @@ def chroomnumber(name, roomnumber):
     '''
     Change the user's Room Number
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chroomnumber foo 123
     '''
@@ -318,7 +341,9 @@ def chworkphone(name, workphone):
     '''
     Change the user's Work Phone
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chworkphone foo "7735550123"
     '''
@@ -342,7 +367,9 @@ def chhomephone(name, homephone):
     '''
     Change the user's Home Phone
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.chhomephone foo "7735551234"
     '''
@@ -366,7 +393,9 @@ def info(name):
     '''
     Return user information
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.info root
     '''
@@ -398,24 +427,10 @@ def list_groups(name):
     '''
     Return a list of groups the named user belongs to
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt '*' user.list_groups foo
     '''
-    ugrp = set()
-    # Add the primary user's group
-    ugrp.add(grp.getgrgid(pwd.getpwnam(name).pw_gid).gr_name)
-
-    # If we already grabbed the group list, it's overkill to grab it again
-    if 'user.getgrall' in __context__:
-        groups = __context__['user.getgrall']
-    else:
-        groups = grp.getgrall()
-        __context__['user.getgrall'] = groups
-
-    # Now, all other groups the user belongs to
-    for group in groups:
-        if name in group.gr_mem:
-            ugrp.add(group.gr_name)
-
-    return sorted(list(ugrp))
+    return salt.utils.get_group_list(name)

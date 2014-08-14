@@ -1,16 +1,49 @@
+# -*- coding: utf-8 -*-
 '''
 Manages configuration files via augeas
 
-:depends:   - Augeas Python adapter
+This module requires the ``augeas`` Python module.
+
+.. _Augeas: http://augeas.net/
+
+.. warning::
+
+    Minimal installations of Debian and Ubuntu have been seen to have packaging
+    bugs with python-augeas, causing the augeas module to fail to import. If
+    the minion has the augeas module installed, but the functions in this
+    execution module fail to run due to being unavailable, first restart the
+    salt-minion service. If the problem persists past that, the following
+    command can be run from the master to determine what is causing the import
+    to fail:
+
+    .. code-block:: bash
+
+        salt minion-id cmd.run 'python -c "from augeas import Augeas"'
+
+    For affected Debian/Ubuntu hosts, installing ``libpython2.7`` has been
+    known to resolve the issue.
 '''
 
-# Load third party libs
+# Import python libs
+import os
+import re
+import logging
+
+# Make sure augeas python interface is installed
 HAS_AUGEAS = False
 try:
-    from augeas import Augeas
+    from augeas import Augeas as _Augeas
     HAS_AUGEAS = True
 except ImportError:
     pass
+
+# Import salt libs
+from salt.exceptions import SaltInvocationError
+
+log = logging.getLogger(__name__)
+
+# Define the module's virtual name
+__virtualname__ = 'augeas'
 
 
 def __virtual__():
@@ -18,14 +51,14 @@ def __virtual__():
     Only run this module if the augeas python module is installed
     '''
     if HAS_AUGEAS:
-        return 'augeas'
+        return __virtualname__
     return False
 
 
 def _recurmatch(path, aug):
     '''
     Recursive generator providing the infrastructure for
-    augtools print behaviour.
+    augtools print behavior.
 
     This function is based on test_augeas.py from
     Harald Hoyer <harald@redhat.com>  in the python-augeas
@@ -41,15 +74,102 @@ def _recurmatch(path, aug):
                 yield _match
 
 
-def _lstrip_word(string, prefix):
+def _lstrip_word(word, prefix):
     '''
     Return a copy of the string after the specified prefix was removed
     from the beginning of the string
     '''
 
-    if string.startswith(prefix):
-        return string[len(prefix):]
-    return string
+    if str(word).startswith(prefix):
+        return str(word)[len(prefix):]
+    return word
+
+
+def execute(context=None, lens=None, commands=()):
+    '''
+    Execute Augeas commands
+
+    .. versionadded:: 2014.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' augeas.execute /files/etc/redis/redis.conf commands='["set bind 0.0.0.0", "set maxmemory 1G"]'
+    '''
+    ret = {'retval': False}
+
+    method_map = {
+        'set':    'set',
+        'mv':     'move',
+        'move':   'move',
+        'ins':    'insert',
+        'insert': 'insert',
+        'rm':     'remove',
+        'remove': 'remove',
+    }
+
+    flags = _Augeas.NO_MODL_AUTOLOAD if lens else _Augeas.NONE
+    aug = _Augeas(flags=flags)
+
+    if lens:
+        aug.add_transform(lens, re.sub('^/files', '', context))
+        aug.load()
+
+    for command in commands:
+        # first part up to space is always the command name (ie: set, move)
+        cmd, arg = command.split(' ', 1)
+        if cmd not in method_map:
+            ret['error'] = 'Command {0} is not supported (yet)'.format(cmd)
+            return ret
+
+        method = method_map[cmd]
+
+        try:
+            if method == 'set':
+                path, value, remainder = re.split('([^\'" ]+|"[^"]+"|\'[^\']+\')$', arg, 1)
+                if context:
+                    path = os.path.join(context.rstrip('/'), path.lstrip('/'))
+                value = value.strip('"').strip("'")
+                args = {'path': path, 'value': value}
+            elif method == 'move':
+                path, dst = arg.split(' ', 1)
+                if context:
+                    path = os.path.join(context.rstrip('/'), path.lstrip('/'))
+                args = {'src': path, 'dst': dst}
+            elif method == 'insert':
+                path, where, label = re.split(' (before|after) ', arg)
+                if context:
+                    path = os.path.join(context.rstrip('/'), path.lstrip('/'))
+                args = {'path': path, 'label': label, 'before': where == 'before'}
+            elif method == 'remove':
+                path = arg
+                if context:
+                    path = os.path.join(context.rstrip('/'), path.lstrip('/'))
+                args = {'path': path}
+        except ValueError as err:
+            log.error(str(err))
+            ret['error'] = 'Invalid formatted command, ' \
+                           'see debug log for details: {0}'.format(arg)
+            return ret
+
+        log.debug('{0}: {1}'.format(method, args))
+
+        func = getattr(aug, method)
+        func(**args)
+
+    try:
+        aug.save()
+        ret['retval'] = True
+    except IOError as err:
+        ret['error'] = str(err)
+
+        if lens and not lens.endswith('.lns'):
+            ret['error'] += '\nLenses are normally configured as "name.lns". ' \
+                            'Did you mean "{0}.lns"?'.format(lens)
+
+    aug.close()
+    return ret
 
 
 def get(path, value=''):
@@ -62,7 +182,7 @@ def get(path, value=''):
 
         salt '*' augeas.get /files/etc/hosts/1/ ipaddr
     '''
-    aug = Augeas()
+    aug = _Augeas()
     ret = {}
 
     path = path.rstrip('/')
@@ -119,27 +239,31 @@ def setvalue(*args):
 
         %wheel ALL = PASSWD : ALL , NOPASSWD : /usr/bin/apt-get , /usr/bin/aptitude
     '''
-    aug = Augeas()
+    aug = _Augeas()
     ret = {'retval': False}
 
-    tuples = filter(lambda x: not x.startswith('prefix='), args)
-    prefix = filter(lambda x: x.startswith('prefix='), args)
+    tuples = filter(lambda x: not str(x).startswith('prefix='), args)
+    prefix = filter(lambda x: str(x).startswith('prefix='), args)
     if prefix:
-        prefix = prefix[0].split('=', 1)[1]
+        if len(prefix) > 1:
+            raise SaltInvocationError(
+                'Only one \'prefix=\' value is permitted'
+            )
+        else:
+            prefix = prefix[0].split('=', 1)[1]
 
     if len(tuples) % 2 != 0:
-        return ret  # ensure we have multiple of twos
+        raise SaltInvocationError('Uneven number of path/value arguments')
 
     tuple_iter = iter(tuples)
-
     for path, value in zip(tuple_iter, tuple_iter):
         target_path = path
         if prefix:
-            target_path = "{0}/{1}".format(prefix.rstrip('/'), path.lstrip('/'))
+            target_path = os.path.join(prefix.rstrip('/'), path.lstrip('/'))
         try:
             aug.set(target_path, str(value))
         except ValueError as err:
-            ret['error'] = "Multiple values: " + str(err)
+            ret['error'] = 'Multiple values: {0}'.format(err)
 
     try:
         aug.save()
@@ -159,7 +283,7 @@ def match(path, value=''):
 
         salt '*' augeas.match /files/etc/services/service-name ssh
     '''
-    aug = Augeas()
+    aug = _Augeas()
     ret = {}
 
     try:
@@ -185,7 +309,7 @@ def remove(path):
 
         salt '*' augeas.remove /files/etc/sysctl.conf/net.ipv4.conf.all.log_martians
     '''
-    aug = Augeas()
+    aug = _Augeas()
     ret = {'retval': False}
     try:
         count = aug.remove(path)
@@ -224,7 +348,7 @@ def ls(path):  # pylint: disable=C0103
             ret[_ma] = aug.get(_ma)
         return ret
 
-    aug = Augeas()
+    aug = _Augeas()
 
     path = path.rstrip('/') + '/'
     match_path = path + '*'
@@ -251,7 +375,7 @@ def tree(path):
 
         salt '*' augeas.tree /files/etc/
     '''
-    aug = Augeas()
+    aug = _Augeas()
 
     path = path.rstrip('/') + '/'
     match_path = path

@@ -1,14 +1,13 @@
+# -*- coding: utf-8 -*-
 '''
 Manage users with the useradd command
 '''
 
 # Import python libs
 try:
-    import grp
     import pwd
 except ImportError:
     pass
-import os
 import logging
 import copy
 
@@ -18,12 +17,15 @@ from salt._compat import string_types
 
 log = logging.getLogger(__name__)
 
+# Define the module's virtual name
+__virtualname__ = 'user'
+
 
 def __virtual__():
     '''
     Set the user module if the kernel is FreeBSD
     '''
-    return 'user' if __grains__['kernel'] == 'FreeBSD' else False
+    return __virtualname__ if __grains__['kernel'] == 'FreeBSD' else False
 
 
 def _get_gecos(name):
@@ -76,6 +78,7 @@ def add(name,
 
         salt '*' user.add name <uid> <gid> <groups> <home> <shell>
     '''
+    kwargs = salt.utils.clean_kwargs(**kwargs)
     if salt.utils.is_true(kwargs.pop('system', False)):
         log.warning('pw_user module does not support the \'system\' argument')
     if kwargs:
@@ -91,7 +94,7 @@ def add(name,
     if groups:
         cmd += '-G {0} '.format(','.join(groups))
     if home is not None:
-        cmd += '-b {0} '.format(os.path.dirname(home))
+        cmd += '-d {0} '.format(home)
     if createhome is True:
         cmd += '-m '
     if shell:
@@ -125,14 +128,14 @@ def delete(name, remove=False, force=False):
     cmd = 'pw userdel '
     if remove:
         cmd += '-r '
-    cmd += name
+    cmd += '-n ' + name
 
     ret = __salt__['cmd.run_all'](cmd)
 
     return not ret['retcode']
 
 
-def getent():
+def getent(refresh=False):
     '''
     Return the list of all info for all users
 
@@ -142,7 +145,7 @@ def getent():
 
         salt '*' user.getent
     '''
-    if 'user.getent' in __context__:
+    if 'user.getent' in __context__ and not refresh:
         return __context__['user.getent']
 
     ret = []
@@ -229,10 +232,9 @@ def chhome(name, home, persist=False):
     pre_info = info(name)
     if home == pre_info['home']:
         return True
-    cmd = 'pw usermod -d {0} '.format(home)
+    cmd = 'pw usermod {0} -d {1}'.format(name, home)
     if persist:
         cmd += ' -m '
-    cmd += name
     __salt__['cmd.run'](cmd)
     post_info = info(name)
     if post_info['home'] != pre_info['home']:
@@ -410,24 +412,4 @@ def list_groups(name):
 
         salt '*' user.list_groups foo
     '''
-    ugrp = set()
-    # Add the primary user's group
-    try:
-        ugrp.add(grp.getgrgid(pwd.getpwnam(name).pw_gid).gr_name)
-    except KeyError:
-        # The user's applied default group is undefined on the system, so
-        # it does not exist
-        pass
-
-    # If we already grabbed the group list, it's overkill to grab it again
-    if 'user.getgrall' in __context__:
-        groups = __context__['user.getgrall']
-    else:
-        groups = grp.getgrall()
-        __context__['user.getgrall'] = groups
-
-    # Now, all other groups the user belongs to
-    for group in groups:
-        if name in group.gr_mem:
-            ugrp.add(group.gr_name)
-    return sorted(list(ugrp))
+    return salt.utils.get_group_list(name)

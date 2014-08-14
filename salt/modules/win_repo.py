@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 r'''
 Module to manage Windows software repo on a Standalone Minion
 
@@ -14,7 +15,10 @@ import os
 
 # Import third party libs
 import yaml
-import msgpack
+try:
+    import msgpack
+except ImportError:
+    import msgpack_pure as msgpack
 
 # Import salt libs
 import salt.output
@@ -24,13 +28,16 @@ from salt._compat import string_types
 
 log = logging.getLogger(__name__)
 
+# Define the module's virtual name
+__virtualname__ = 'winrepo'
+
 
 def __virtual__():
     '''
     Set the winrepo module if the OS is Windows
     '''
     if salt.utils.is_windows():
-        return 'winrepo'
+        return __virtualname__
     return False
 
 
@@ -38,7 +45,9 @@ def genrepo():
     r'''
     Generate win_repo_cachefile based on sls files in the win_repo
 
-    CLI Example::
+    CLI Example:
+
+    .. code-block:: bash
 
         salt-call winrepo.genrepo -c c:\salt\conf
     '''
@@ -70,7 +79,7 @@ def genrepo():
                             revmap[repodata['full_name']] = pkgname
                     ret.setdefault('repo', {}).update(config)
                     ret.setdefault('name_map', {}).update(revmap)
-    with salt.utils.fopen(os.path.join(repo, winrepo), 'w') as repo:
+    with salt.utils.fopen(os.path.join(repo, winrepo), 'w+b') as repo:
         repo.write(msgpack.dumps(ret))
     salt.output.display_output(ret, 'pprint', __opts__)
     return ret
@@ -80,10 +89,11 @@ def update_git_repos():
     '''
     Checkout git repos containing Windows Software Package Definitions
 
-    Note: This function will not work unless git is installed and the git
-          module is further updated to work on Windows.
-          In the meantime just place all Windows package files in
-      the 'win_repo' directory.
+    .. note::
+
+        This function will not work unless git is installed and the git module
+        is further updated to work on Windows. In the meantime just place all
+        Windows package files in the ``win_repo`` directory.
     '''
     ret = {}
     #mminion = salt.minion.MasterMinion(__opts__)
@@ -95,9 +105,14 @@ def update_git_repos():
         #else:
             #targetname = gitrepo
         targetname = gitrepo
+        rev = None
+        # If a revision is specified, use it.
+        if len(gitrepo.strip().split(' ')) > 1:
+            rev, gitrepo = gitrepo.strip().split(' ')
         gittarget = os.path.join(repo, targetname)
         #result = mminion.states['git.latest'](gitrepo,
         result = __salt__['git.latest'](gitrepo,
+                                        rev=rev,
                                         target=gittarget,
                                         force=True)
         ret[result['name']] = result['result']
